@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TodoPulse 用户使用手册</title>
+<style>
+  :root{
+    --primary:#2563EB;
+    --primary-2:#3B82F6;
+    --primary-3:#1D4ED8;
+    --bg:#FFFFFF;
+    --bg-soft:#F7F8FA;
+    --bg-side:rgba(255,255,255,.72);
+    --text:#1F2937;
+    --text-soft:#6B7280;
+    --border:#E5E7EB;
+    --green:#16A34A;
+    --amber:#F59E0B;
+    --red:#DC2626;
+    --blue:#2563EB;
+    --code-bg:#0F172A;
+    --code-text:#E5E7EB;
+    --shadow:0 10px 30px -12px rgba(15,23,42,.18);
+    --radius:16px;
+    --header-grad:linear-gradient(120deg,#1D4ED8 0%,#3B82F6 55%,#60A5FA 100%);
+  }
+  [data-theme="dark"]{
+    --primary:#3B82F6;
+    --primary-2:#60A5FA;
+    --primary-3:#2563EB;
+    --bg:#0F172A;
+    --bg-soft:#111c33;
+    --bg-side:rgba(17,28,51,.72);
+    --text:#E5E7EB;
+    --text-soft:#9CA3AF;
+    --border:#243049;
+    --shadow:0 10px 30px -12px rgba(0,0,0,.55);
+    --header-grad:linear-gradient(120deg,#0b1830 0%,#1e3a8a 55%,#2563EB 100%);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","思源黑体",sans-serif;
+    background:var(--bg-soft);
+    color:var(--text);
+    line-height:1.75;
+    font-size:16px;
+    -webkit-font-smoothing:antialiased;
+    transition:background .3s ease,color .3s ease;
+  }
+  a{color:var(--primary);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------- Header ---------- */
+  header.hero{
+    background:var(--header-grad);
+    color:#fff;
+    padding:48px 32px 56px;
+    position:relative;
+    overflow:hidden;
+  }
+  header.hero::after{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(circle at 85% 20%,rgba(255,255,255,.18),transparent 45%),
+              radial-gradient(circle at 10% 90%,rgba(255,255,255,.12),transparent 40%);
+    pointer-events:none;
+  }
+  .hero-inner{max-width:1280px;margin:0 auto;position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  .hero h1{font-size:34px;font-weight:700;letter-spacing:.5px}
+  .hero p{margin-top:10px;opacity:.92;font-size:16px;max-width:680px}
+  .hero .badge{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);padding:4px 12px;border-radius:999px;font-size:13px;margin-top:16px}
+  .theme-toggle{
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);
+    color:#fff;padding:10px 16px;border-radius:999px;cursor:pointer;font-size:14px;
+    backdrop-filter:blur(6px);transition:.2s;white-space:nowrap;
+  }
+  .theme-toggle:hover{background:rgba(255,255,255,.28)}
+
+  /* ---------- Layout ---------- */
+  .layout{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:280px 1fr;gap:32px;padding:32px;align-items:start}
+  nav.toc{
+    position:sticky;top:24px;align-self:start;
+    background:var(--bg-side);backdrop-filter:blur(14px);
+    border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px 14px;box-shadow:var(--shadow);max-height:calc(100vh - 48px);overflow:auto;
+  }
+  nav.toc h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--text-soft);margin:6px 10px 12px}
+  nav.toc a{
+    display:block;padding:8px 12px;border-radius:10px;color:var(--text-soft);font-size:14.5px;
+    border-left:3px solid transparent;transition:.18s;
+  }
+  nav.toc a:hover{background:var(--bg-soft);text-decoration:none;color:var(--text)}
+  nav.toc a.active{background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);border-left-color:var(--primary);font-weight:600}
+  nav.toc .sub{padding-left:26px;font-size:13.5px}
+
+  main{min-width:0}
+  section{
+    background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
+    padding:30px 34px;margin-bottom:26px;box-shadow:var(--shadow);
+    scroll-margin-top:24px;
+  }
+  section h2{font-size:26px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+  section h2 .num{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:34px;height:34px;border-radius:10px;background:var(--primary);color:#fff;font-size:16px;flex:none;
+  }
+  section h3{font-size:19px;font-weight:600;margin:26px 0 10px;color:var(--text)}
+  section h4{font-size:16px;font-weight:600;margin:18px 0 8px;color:var(--primary-3)}
+  section p{margin:10px 0;color:var(--text)}
+  section ul,section ol{margin:10px 0 10px 22px}
+  section li{margin:6px 0}
+  .lead{color:var(--text-soft);margin-top:2px}
+
+  .steps{counter-reset:step;list-style:none;margin:14px 0;padding:0}
+  .steps>li{position:relative;padding:12px 16px 12px 52px;margin:10px 0;background:var(--bg-soft);border:1px solid var(--border);border-radius:12px}
+  .steps>li::before{
+    counter-increment:step;content:counter(step);
+    position:absolute;left:14px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--primary);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  }
+
+  .callout{border-radius:12px;padding:14px 18px;margin:16px 0;border:1px solid;display:flex;gap:12px;align-items:flex-start}
+  .callout .ic{font-size:18px;line-height:1.4}
+  .callout.tip{background:color-mix(in srgb,var(--green) 10%,transparent);border-color:color-mix(in srgb,var(--green) 35%,transparent)}
+  .callout.warn{background:color-mix(in srgb,var(--amber) 12%,transparent);border-color:color-mix(in srgb,var(--amber) 40%,transparent)}
+  .callout.danger{background:color-mix(in srgb,var(--red) 10%,transparent);border-color:color-mix(in srgb,var(--red) 35%,transparent)}
+  .callout.info{background:color-mix(in srgb,var(--blue) 10%,transparent);border-color:color-mix(in srgb,var(--blue) 32%,transparent)}
+  .callout strong{display:block;margin-bottom:2px}
+
+  code{font-family:"JetBrains Mono",Consolas,Menlo,monospace;background:color-mix(in srgb,var(--primary) 12%,transparent);padding:2px 7px;border-radius:6px;font-size:13.5px;color:var(--primary-3)}
+  [data-theme="dark"] code{color:var(--primary-2)}
+  pre{background:var(--code-bg);color:var(--code-text);padding:16px 18px;border-radius:12px;overflow:auto;font-size:13.5px;line-height:1.6;margin:12px 0}
+  pre code{background:none;color:inherit;padding:0}
+
+
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{border:1px solid var(--border);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--bg-soft);font-weight:600}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+
+  .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .pill.g{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+  .pill.a{background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--amber)}
+  .pill.r{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)}
+  .pill.b{background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue)}
+
+  /* mobile drawer */
+  .toc-btn{display:none}
+  @media(max-width:980px){
+    .layout{grid-template-columns:1fr}
+    nav.toc{position:fixed;left:0;top:0;bottom:0;width:280px;z-index:50;border-radius:0;transform:translateX(-100%);transition:.25s}
+    nav.toc.open{transform:none}
+    .toc-btn{display:inline-flex;position:fixed;left:16px;bottom:20px;z-index:60;background:var(--primary);color:#fff;border:none;padding:14px 18px;border-radius:999px;box-shadow:var(--shadow);cursor:pointer;font-size:14px}
+    .scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:45}
+    .scrim.show{display:block}
+  }
+  footer{text-align:center;color:var(--text-soft);font-size:13.5px;padding:30px}
+  footer code{font-size:12.5px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <h1>TodoPulse 用户使用手册</h1>
+      <p>统信 UOS 桌面待办应用，配套 Chromium 浏览器扩展，可一键将网页内容收藏为待办事项。本手册面向最终使用者，按"点哪、填什么、怎么用"逐步讲解全部功能。</p>
+      <span class="badge">版本 v1.4.0 · 支持 x86_64 · 离线可用</span>
+    </div>
+    <button class="theme-toggle" id="themeToggle">🌙 切换深色</button>
+  </div>
+</header>
+
+<button class="toc-btn" id="tocBtn">☰ 目录</button>
+<div class="scrim" id="scrim"></div>
+
+<div class="layout">
+  <nav class="toc" id="toc">
+    <h2>目录</h2>
+    <a href="#intro">1. 简介与系统要求</a>
+    <a href="#install">2. 安装与首次启动</a>
+    <a href="#ui-overview">3. 主界面概览</a>
+    <a href="#todo-manage">4. 待办管理</a>
+    <a href="#todo-manage" class="sub">4.1 新建与编辑待办</a>
+    <a href="#todo-manage" class="sub">4.2 分类与标签</a>
+    <a href="#todo-manage" class="sub">4.3 搜索与排序</a>
+    <a href="#todo-manage" class="sub">4.4 子任务清单</a>
+    <a href="#todo-manage" class="sub">4.5 重复待办</a>
+    <a href="#todo-manage" class="sub">4.6 自然语言时间</a>
+    <a href="#todo-manage" class="sub">4.7 筛选与批量</a>
+    <a href="#extension">5. 浏览器扩展一键收藏</a>
+    <a href="#scripts">6. 网页脚本自定义</a>
+    <a href="#widget">7. 到期悬浮窗</a>
+    <a href="#reminder-tray">8. 提醒与托盘常驻</a>
+    <a href="#stats">9. 数据统计面板</a>
+    <a href="#trash">10. 回收站 · 导入导出</a>
+    <a href="#settings">11. 设置中心</a>
+    <a href="#faq">12. 常见问题 FAQ</a>
+  </nav>
+
+  <main>
+    <!-- 1. 简介 -->
+    <section id="intro">
+      <h2><span class="num">1</span>简介与系统要求</h2>
+      <p class="lead">TodoPulse 是一款运行在统信 UOS（x86_64）上的桌面待办应用，配合浏览器扩展，让您在浏览网页时随时把想要跟进的内容变成待办。</p>
+
+      <h3>它能帮您做什么</h3>
+      <ul>
+        <li><strong>浏览器收藏即待办</strong>：在任意网页选中文字，点右下角悬浮按钮即可生成待办，自动带上来源网页、选中文本与时间。</li>
+        <li><strong>分类与标签管理</strong>：工作 / 生活 / 学习内置分类，可自由增删改，并带颜色与数量角标。</li>
+        <li><strong>智能提醒与重复</strong>：到期弹系统通知，支持每天 / 每周 / 每月循环，重复完成后自动生成下一轮。</li>
+        <li><strong>子任务拆解</strong>：一条待办可拆分为多个子项，显示「已完成/总数」进度。</li>
+        <li><strong>悬浮窗与统计</strong>：常驻桌面的到期看板，以及完成率、趋势、分布等数据图表。</li>
+      </ul>
+
+      <h3>系统要求</h3>
+      <table>
+        <tr><th>项目</th><th>要求</th></tr>
+        <tr><td>操作系统</td><td>统信 UOS（x86_64）；亦支持 Windows / macOS（开机自启走系统 API）</td></tr>
+        <tr><td>桌面环境依赖</td><td>通知依赖 <code>libnotify4</code>，并需系统通知权限</td></tr>
+        <tr><td>浏览器扩展</td><td>Chromium 内核浏览器（Chrome / Edge / 360 极速等），支持 Manifest V3</td></tr>
+        <tr><td>网络</td><td>本地服务仅监听 <code>127.0.0.1</code>，无需外网</td></tr>
+      </table>
+
+      <div class="callout info">
+        <span class="ic">ℹ️</span>
+        <div><strong>数据安全</strong>所有待办存储在本地 <code>userData/todos.db</code>（UOS 通常为 <code>~/.config/TodoPulse/todos.db</code>），不上传云端，全程离线可用。</div>
+      </div>
+    </section>
+
+    <!-- 2. 安装 -->
+    <section id="install">
+      <h2><span class="num">2</span>安装与首次启动</h2>
+
+      <h3>安装应用（UOS）</h3>
+      <ol class="steps">
+        <li>获取安装包 <code>dist-electron/*.deb</code>（由开发侧 <code>npm run dist</code> 打包生成）。</li>
+        <li>打开终端，执行安装命令：<pre><code>sudo dpkg -i dist-electron/*.deb
+# 或
+sudo apt install ./dist-electron/*.deb</code></pre></li>
+        <li>安装脚本会在 <code>${HOME}/.config/TodoPulse</code> 创建数据目录，扩展目录为 <code>/opt/TodoPulse/resources/browser-extension/</code>。</li>
+      </ol>
+
+      <h3>首次启动与获取端口 / Token</h3>
+      <ol class="steps">
+        <li>从应用菜单或启动器启动 <strong>TodoPulse</strong>。</li>
+        <li>应用自动生成配置文件 <code>~/.config/TodoPulse/config.json</code>，其中包含随机生成的 <code>port</code>（端口，通常从 3210 起探测）与 32 位十六进制 <code>token</code>。</li>
+        <li>点击界面 🧩 按钮打开「浏览器扩展使用指南」，其中直接展示当前<strong>端口</strong>与 <strong>Token</strong>，并可一键打开扩展目录。</li>
+        <li>在浏览器扩展弹窗中填入端口与 Token，点击「测试连接并保存」即可，无需手动编辑 <code>chrome.storage.local</code>。</li>
+      </ol>
+
+
+      <div class="callout warn">
+        <span class="ic">⚠️</span>
+        <div><strong>扩展连不上？</strong>若扩展提示未配置端口或 Token，请先确认 TodoPulse 已启动，再在扩展弹窗中重新「测试连接并保存」。</div>
+      </div>
+    </section>
+
+    <!-- 3. 主界面 -->
+    <section id="ui-overview">
+      <h2><span class="num">3</span>主界面概览</h2>
+      <p class="lead">主窗口采用三栏布局，配合顶部搜索排序栏与底部状态栏。</p>
+
+
+      <div class="grid2">
+        <div>
+          <h4>① 左侧 · 分类侧边栏</h4>
+          <ul>
+            <li>快捷视图：全部 / 未完成 / 已完成 / 今天到期 / 已逾期。</li>
+            <li>分类列表：工作 / 生活 / 学习，带颜色标与待办数量角标。</li>
+            <li>新增、重命名、删除分类；入口含 🧩 网页脚本。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>② 顶部 · 搜索排序栏</h4>
+          <ul>
+            <li>全局搜索：实时匹配标题 / 描述 / 来源网页标题 / 选中文本，高亮关键词。</li>
+            <li>排序：按创建时间、截止时间、优先级，可切换升 / 降序。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="grid2">
+        <div>
+          <h4>③ 中部 · 待办列表</h4>
+          <ul>
+            <li>每条显示分类色标、子任务进度、重复标识、关键词高亮。</li>
+            <li>支持多选进行批量操作。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>④ 底部 · 状态栏</h4>
+          <ul>
+            <li>显示总数 / 已完成等概览信息。</li>
+            <li>托盘常驻时主窗口可最小化到系统托盘。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <span class="ic">💡</span>
+        <div><strong>快捷视图</strong>左侧「今天到期」「已逾期」是互斥的快捷筛选，帮您一眼看清当下最该处理的事项。</div>
+      </div>
+    </section>
+
+    <!-- 4. 待办管理 -->
+    <section id="todo-manage">
+      <h2><span class="num">4</span>待办管理</h2>
+      <p class="lead">从新建一条待办，到分类、排序、拆解子任务、设置重复与提醒，本节覆盖日常最常用的操作。</p>
+
+      <h3>4.1 新建与编辑待办</h3>
+      <ol class="steps">
+        <li>点击主界面「+ 新建待办」（或托盘菜单「新建待办」）打开新增 / 编辑弹窗。</li>
+        <li>填写<strong>标题</strong>与<strong>描述</strong>；可设置<strong>优先级</strong>（高 / 中 / 低）、<strong>分类</strong>、<strong>截止时间</strong>与<strong>提醒</strong>。</li>
+        <li>截止时间支持直接点选，也支持<strong>自然语言</strong>输入（如「明天下午5点」），详见 4.6。</li>
+        <li>点击「保存」即入库。如需拆解任务，见 4.4 子任务。</li>
+      </ol>
+
+      <h3>4.2 分类与标签</h3>
+      <ul>
+        <li><strong>新建分类</strong>：在左侧侧边栏点击「+ 新建分类」，命名并选取颜色。</li>
+        <li><strong>重命名 / 删除</strong>：右键或hover分类项，可重命名、删除；删除后其下待办自动回落为「未分类」。</li>
+        <li>分类带<strong>颜色标识</strong>与<strong>待办数量角标</strong>，方便快速辨识。</li>
+      </ul>
+
+      <h3>4.3 搜索与排序</h3>
+      <ul>
+        <li>顶部搜索框输入关键词，实时在标题、描述、来源网页标题、选中文本中匹配，并<strong>高亮命中关键词</strong>。</li>
+        <li>排序切换：按<strong>创建时间 / 截止时间 / 优先级</strong>，并可切换<strong>升序 / 降序</strong>。</li>
+      </ul>
+
+      <h3>4.4 子任务清单</h3>
+      <ol class="steps">
+        <li>在新增 / 编辑弹窗中，找到「子任务」区域，逐条添加子项。</li>
+        <li>支持勾选完成、增 / 删 / 改子项。</li>
+        <li>列表项会显示「<strong>2/5</strong>」形式的进度，直观反映完成度。</li>
+      </ol>
+
+      <h3>4.5 重复待办</h3>
+      <ul>
+        <li>在编辑弹窗中设置<strong>重复规则</strong>：每天 / 每周 / 每月，并可指定间隔（如每 2 周）。</li>
+        <li>完成当前轮次后，系统<strong>自动生成下一轮</strong>（含子任务复制），并保留历史完成记录。</li>
+      </ul>
+
+      <h3>4.6 自然语言时间解析</h3>
+      <p>截止时间一栏支持用日常语言描述时间，基于 <code>chrono-node</code>（已启用中文简体 locale）自动识别，例如：</p>
+      <table>
+        <tr><th>您输入</th><th>识别为</th></tr>
+        <tr><td><code>9月10日</code></td><td>今年 9 月 10 日</td></tr>
+        <tr><td><code>下周三</code></td><td>下一个星期三</td></tr>
+        <tr><td><code>明天下午5点</code></td><td>明天 17:00</td></tr>
+      </table>
+      <div class="callout tip"><span class="ic">💡</span><div><strong>小技巧</strong>浏览器扩展收藏时，选中文本里若含时间（如「周五前提交」），也会被自动解析为截止时间。</div></div>
+
+      <h3>4.7 状态筛选与批量管理</h3>
+      <ul>
+        <li><strong>状态筛选</strong>：顶部或侧栏切换「全部 / 未完成 / 已完成」。</li>
+        <li><strong>优先级筛选</strong>：按高 / 中 / 低过滤。</li>
+        <li><strong>快捷视图</strong>：「今天到期」「已逾期」一键查看。</li>
+        <li><strong>批量管理</strong>：勾选多条待办后<strong>批量删除</strong>，或「一键清除已完成项」。</li>
+      </ul>
+    </section>
+
+    <!-- 5. 扩展 -->
+    <section id="extension">
+      <h2><span class="num">5</span>浏览器扩展一键收藏</h2>
+      <p class="lead">把网页内容变成待办最便捷的方式：在浏览器里装上扩展，就能随时收藏。</p>
+
+      <h3>加载扩展</h3>
+      <ol class="steps">
+        <li>打开 Chromium 系浏览器（Chrome / Edge / 360 极速等）。</li>
+        <li>地址栏输入 <code>chrome://extensions</code>，开启右上角「开发者模式」。</li>
+        <li>点击「加载已解压的扩展程序」，选择 <code>/opt/TodoPulse/resources/browser-extension/</code>（开发期可选源码中的 <code>browser-extension/</code>）。</li>
+      </ol>
+
+      <h3>配置端口与 Token</h3>
+      <ol class="steps">
+        <li>点击浏览器工具栏的扩展图标，在弹窗中填写<strong>端口</strong>与 <strong>Token</strong>（来自应用内 🧩 指南或 <code>~/.config/TodoPulse/config.json</code>）。</li>
+        <li>点击「测试连接并保存」，还可设置默认分类与默认提醒。</li>
+      </ol>
+
+      <h3>一键收藏</h3>
+      <ol class="steps">
+        <li>在任意网页<strong>选中文本</strong>，页面右下角出现「加入待办」悬浮按钮。</li>
+        <li>点击后展开面板，可编辑标题、描述、优先级、分类、截止时间与提醒，确认后入库。</li>
+        <li>若命中「一键入库」脚本，悬浮按钮会变为紫色「⚡ 一键收藏」，点击直接提交。</li>
+      </ol>
+
+
+      <div class="callout warn">
+        <span class="ic">⚠️</span>
+        <div><strong>升级后请重新加载扩展</strong>当 <code>manifest.json</code> 发生变更（如新增沙箱页声明），需在 <code>chrome://extensions</code> 点击扩展卡片上的刷新按钮重新加载，否则自定义 JS 模式不可用；选择器模式不受影响。</div>
+      </div>
+    </section>
+
+    <!-- 6. 脚本 -->
+    <section id="scripts">
+      <h2><span class="num">6</span>网页脚本自定义</h2>
+      <p class="lead">针对常用网站（如 Jira、工单系统）编写规则，让扩展自动提取网页字段生成待办，免去手动填写。</p>
+
+      <h3>进入脚本管理</h3>
+      <p>侧边栏「🧩 网页脚本」、顶栏图标或托盘菜单均可进入。左侧脚本列表 + 右侧编辑器，支持<strong>新建、复制、删除与启用停用</strong>。</p>
+
+      <h3>URL 规则匹配</h3>
+      <ul>
+        <li>每条脚本可配置多条通配规则，如 <code>jira.company.com/*</code>、<code>*.example.com</code>。</li>
+        <li><strong>无协议头</strong>的规则自动兼容 http / https；<strong>未以 <code>*</code> 结尾</strong>的规则自动允许后续路径。</li>
+        <li>同一网页命中多条脚本时，面板顶部提示条可下拉切换并「重新提取」。</li>
+      </ul>
+
+      <h3>双模式提取</h3>
+      <div class="grid2">
+        <div>
+          <h4>CSS 选择器模式（零代码）</h4>
+          <ul>
+            <li>为<strong>标题 / 描述 / 截止时间 / 优先级</strong>分别配置选择器与取值方式。</li>
+            <li>取值方式：文本、HTML、链接、图片地址、表单值、自定义属性。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>自定义 JS 模式</h4>
+          <ul>
+            <li>编写函数体，可用 <code>doc</code>（网页文档）、<code>url</code>（网址）、<code>selection</code>（选中文本）三个变量。</li>
+            <li>返回 <code>{ title, description, deadline, priority }</code>。</li>
+            <li>提供示例模板与语法校验。</li>
+          </ul>
+        </div>
+      </div>
+
+      <h4>JS 模式示例</h4>
+      <pre><code>// doc：网页文档快照（支持 querySelector 等）
+// url：当前网页地址
+// selection：页面上选中的文本
+const titleEl = doc.querySelector('h1');
+return {
+  title: titleEl ? titleEl.textContent.trim() : doc.title,
+  description: selection || '',
+  deadline: '',
+  priority: 'medium'   // high / medium / low，也支持「高 / 中 / 低」
+};</code></pre>
+
+      <h3>两种应用方式</h3>
+      <ul>
+        <li><span class="pill b">预填面板</span> 将提取结果填入表单供您确认修改后再提交。</li>
+        <li><span class="pill a">一键入库</span> 直接提交，悬浮按钮切换为紫色「⚡ 一键收藏」态。</li>
+      </ul>
+
+      <div class="callout danger">
+        <span class="ic">🔒</span>
+        <div><strong>安全说明</strong>自定义 JS 在沙箱中执行：无扩展 API、无网络、无法访问真实页面 DOM，仅能操作传入的网页快照；执行超时 2 秒，结果经字段白名单与长度截断（标题 100、描述 2000、截止 200 字符）后才可用。</div>
+      </div>
+
+      <div class="callout info">
+        <span class="ic">ℹ️</span>
+        <div><strong>失败静默降级</strong>桌面端未运行、脚本拉取失败、执行异常或超时时，一律回退为手动填写，不影响原有收藏流程。</div>
+      </div>
+    </section>
+
+    <!-- 7. 悬浮窗 -->
+    <section id="widget">
+      <h2><span class="num">7</span>到期悬浮窗</h2>
+      <p class="lead">一个常驻桌面的小挂件，主窗口最小化到托盘时仍然可见，随时提醒您临近到期的事项。</p>
+
+      <h3>外观与交互</h3>
+      <ul>
+        <li><strong>独立置顶小窗</strong>：无边框、始终置顶、可拖动、可缩放；可单独关闭。</li>
+        <li><strong>三段到期看板</strong>：已逾期（红）/ 今天到期（橙）/ 本周到期（蓝），各带数量角标，段头可折叠；逾期显示「逾期 N 天」，今天显示「N 小时后」，本周显示「明天 17:00 / 周三 09:00」等相对时间。</li>
+        <li><strong>窗内交互</strong>：勾选框直接标记完成（划线淡出后移除）；点击事项打开主窗口并按标题筛选定位；顶部刷新按钮带旋转动效。</li>
+      </ul>
+
+
+      <h3>开关、记忆与不透明度</h3>
+      <ul>
+        <li><strong>开关</strong>：设置页「📌 悬浮窗」分组与托盘菜单「到期悬浮窗」勾选项均可开关。</li>
+        <li><strong>位置记忆</strong>：移动 / 缩放停止 400ms 后自动记录，下次启动复原；显示器变化导致坐标越界时自动回落屏幕右下角。</li>
+        <li><strong>不透明度</strong>：60%–100% 可调，鼠标悬停时自动恢复 100%，兼顾常驻不遮挡与可读性。</li>
+        <li><strong>数据同步</strong>：主窗口增改删待办后，悬浮窗自动刷新；反之亦然。</li>
+      </ul>
+    </section>
+
+    <!-- 8. 提醒托盘 -->
+    <section id="reminder-tray">
+      <h2><span class="num">8</span>提醒与托盘常驻</h2>
+
+      <h3>到期提醒</h3>
+      <ul>
+        <li>主进程按配置间隔扫描，对到点或逾期的未完成待办<strong>弹系统通知</strong>。</li>
+        <li>支持提前 5 分钟 / 10 分钟 / 30 分钟 / 1 小时 / 3 小时 / 1 天提醒。</li>
+        <li><strong>去重</strong>：同一待办同一时间点只提醒一次（去重表）。</li>
+        <li><strong>免打扰</strong>：在免打扰时段内只记录不弹窗。</li>
+      </ul>
+
+      <h3>系统托盘常驻</h3>
+      <ul>
+        <li>关闭主窗口不再退出应用，而是<strong>最小化到托盘</strong>（到期提醒才能持续工作）。</li>
+        <li>托盘菜单支持：打开主界面 / 新建待办 / 查看今日待办 / 设置 / 网页脚本 / 到期悬浮窗 / 退出。</li>
+      </ul>
+
+      <div class="callout tip"><span class="ic">💡</span><div><strong>彻底退出</strong>关闭窗口后应用仍常驻是预期行为；需要退出请点击托盘图标菜单中的「退出」。</div></div>
+    </section>
+
+    <!-- 9. 统计 -->
+    <section id="stats">
+      <h2><span class="num">9</span>数据统计面板</h2>
+      <p class="lead">用图表直观了解自己的待办完成情况与分布。</p>
+      <ul>
+        <li><strong>指标卡</strong>：完成率、总数 / 已完成 / 逾期。</li>
+        <li><strong>趋势图</strong>：近 7 天新增与完成趋势（SVG 折线 + 面积图，带 hover 提示）。</li>
+        <li><strong>分布图</strong>：优先级分布条形图与分类分布环形图。</li>
+        <li>深浅主题自适应，阅读友好。</li>
+      </ul>
+    </section>
+
+    <!-- 10. 回收站/导入导出 -->
+    <section id="trash">
+      <h2><span class="num">10</span>回收站 · 导入导出</h2>
+
+      <h3>回收站与撤销</h3>
+      <ul>
+        <li>删除改为<strong>软删除</strong>进入回收站，支持<strong>单条 / 批量恢复、彻底删除、清空</strong>。</li>
+        <li>删除后弹出 Toast 提供「<strong>撤销</strong>」操作，误删可立即找回。</li>
+      </ul>
+
+      <h3>导入导出</h3>
+      <ul>
+        <li><strong>导出 JSON</strong>：全量备份（含分类与子任务）。</li>
+        <li><strong>导入 JSON</strong>：支持 <span class="pill g">合并</span> 与 <span class="pill a">覆盖</span> 两种模式。</li>
+        <li><strong>导出 CSV</strong>：待办清单（带 BOM，Excel 中文不乱码）。</li>
+      </ul>
+    </section>
+
+    <!-- 11. 设置 -->
+    <section id="settings">
+      <h2><span class="num">11</span>设置中心</h2>
+      <p class="lead">点击主界面「设置」进入，左侧分组导航，右侧内容区，改动多数即时生效。</p>
+
+      <div class="grid2">
+        <div>
+          <h4>外观主题</h4>
+          <ul>
+            <li>浅色 / 深色 / 跟随系统（随系统主题实时变化）。</li>
+            <li>界面密度（紧凑 / 舒适）、字号（常规 / 大 / 特大），即时预览。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>提醒设置</h4>
+          <ul>
+            <li>总开关、默认提前量、免打扰时段（支持跨零点）。</li>
+            <li>扫描间隔、提示音与测试通知。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>本地服务与扩展</h4>
+          <ul>
+            <li>端口显示与修改（保存前探测冲突）。</li>
+            <li>Token 掩码显示 / 复制 / 重新生成、服务启停。</li>
+            <li>扩展目录与指南入口。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>启动与关闭</h4>
+          <ul>
+            <li>开机自启（UOS 写入 <code>~/.config/autostart</code>，Windows / macOS 走系统 API）。</li>
+            <li>关闭窗口最小化到托盘或直接退出。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>数据管理</h4>
+          <ul>
+            <li>导入（合并 / 覆盖）、导出 JSON / CSV。</li>
+            <li>清空回收站与清空全部数据（需输入 <code>DELETE</code> 确认）。</li>
+          </ul>
+        </div>
+        <div>
+          <h4>悬浮窗 & 关于</h4>
+          <ul>
+            <li>「📌 悬浮窗」分组：开关与位置 / 透明度设置。</li>
+            <li>「关于与诊断」：版本与运行环境、数据目录与关键路径（一键打开）、运行日志查看（复制 / 清空）。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12. FAQ -->
+    <section id="faq">
+      <h2><span class="num">12</span>常见问题 FAQ</h2>
+
+      <h4>Q：better-sqlite3 原生模块错误？</h4>
+      <p>A：UOS 下安装后若报错 <code>Unable to find native module</code>，执行 <code>npm exec electron-rebuild -f -w better-sqlite3</code>（或 <code>npx electron-rebuild -f -w better-sqlite3</code>）。</p>
+
+      <h4>Q：扩展无法连接 / 提示未配置端口或 Token？</h4>
+      <p>A：确认 TodoPulse 已启动；在扩展弹窗中填入从 <code>~/.config/TodoPulse/config.json</code>（或应用内 🧩 指南弹窗）读取的 <code>port</code> 与 <code>token</code>，点击「测试连接并保存」。</p>
+
+      <h4>Q：系统通知不显示？</h4>
+      <p>A：确保已安装 <code>libnotify4</code> 并检查系统通知权限。到期提醒每 60 秒扫描一次，同一待办同一时间点只提醒一次。</p>
+
+      <h4>Q：脚本没有生效？</h4>
+      <p>A：依次检查：① 脚本已启用且规则能匹配当前网址；② TodoPulse 桌面端处于运行状态；③ 扩展已按上文提示重新加载过（manifest 变更后必须刷新）；④ 打开面板时顶部是否出现脚本命中提示条，失败提示会显示具体原因。</p>
+
+      <h4>Q：悬浮窗不显示或位置错乱？</h4>
+      <p>A：在设置页「📌 悬浮窗」分组或托盘菜单「到期悬浮窗」勾选项开启；若位置跑到屏幕外，关闭后重新开启会自动回落到屏幕右下角；透明背景在部分 Linux WM 下可能失效，可尝试关闭窗口特效或反馈具体环境。</p>
+
+      <h4>Q：端口被占用？</h4>
+      <p>A：应用启动时会从 3210 起自动探测可用端口；若固定端口冲突，可修改 <code>config_store.js</code> 中的起始端口后重启。</p>
+
+      <h4>Q：关闭窗口后应用没退出？</h4>
+      <p>A：这是预期行为——应用已最小化为系统托盘常驻（到期提醒才能持续工作）。需要退出请点击托盘图标菜单中的「退出」。</p>
+
+      <h4>Q：升级后旧数据丢失了吗？</h4>
+      <p>A：不会。结构升级为增量迁移，且首次升级会自动生成 <code>todos.db.&lt;日期&gt;.bak</code> 备份；如需回滚，用备份文件替换 <code>todos.db</code> 即可。</p>
+
+      <div class="callout info">
+        <span class="ic">📚</span>
+        <div><strong>更多技术细节</strong>开发者视角的完整说明（本地 API、数据库结构、安全机制等）请参阅仓库根目录的 <code>README.md</code>。</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  TodoPulse 用户使用手册 · v1.4.0 · 本页为单文件离线文档，可直接双击打开。<br>
+  配套技术文档：<code>README.md</code>
+</footer>
+
+<script>
+  // 主题切换
+  (function(){
+    var btn=document.getElementById('themeToggle');
+    var root=document.documentElement;
+    function apply(t){
+      root.setAttribute('data-theme',t);
+      btn.textContent = t==='dark' ? '☀️ 切换浅色' : '🌙 切换深色';
+      try{localStorage.setItem('tp-doc-theme',t);}catch(e){}
+    }
+    try{var saved=localStorage.getItem('tp-doc-theme');if(saved)apply(saved);}catch(e){}
+    btn.addEventListener('click',function(){
+      apply(root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+
+  // 目录滚动高亮
+  (function(){
+    var links=Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var map={};
+    links.forEach(function(a){
+      var id=a.getAttribute('href').slice(1);
+      (map[id]=map[id]||[]).push(a);
+    });
+    var sections=Array.prototype.slice.call(document.querySelectorAll('main section'));
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          var id=e.target.id;
+          links.forEach(function(l){l.classList.remove('active');});
+          (map[id]||[]).forEach(function(a){a.classList.add('active');});
+        }
+      });
+    },{rootMargin:'-10% 0px -75% 0px',threshold:0});
+    sections.forEach(function(s){io.observe(s);});
+  })();
+
+  // 移动端目录抽屉
+  (function(){
+    var btn=document.getElementById('tocBtn');
+    var nav=document.getElementById('toc');
+    var scrim=document.getElementById('scrim');
+    function close(){nav.classList.remove('open');scrim.classList.remove('show');}
+    btn.addEventListener('click',function(){nav.classList.toggle('open');scrim.classList.toggle('show');});
+    scrim.addEventListener('click',close);
+    nav.addEventListener('click',function(e){if(e.target.tagName==='A')close();});
+  })();
+</script>
+</body>
+</html>

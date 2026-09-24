@@ -1,0 +1,7 @@
+#!/bin/sh
+# postinst script for TodoPulse on UOS
+set -e
+mkdir -p "${HOME}/.config/TodoPulse"
+echo "TodoPulse installed successfully!"
+echo "Extension path: /opt/TodoPulse/resources/browser-extension/"
+exit 0

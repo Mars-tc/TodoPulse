@@ -1,0 +1,35 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+dist-electron/
+src-renderer/dist/
+release/
+
+# 数据库与备份（本地运行数据）
+*.db
+*.db-*
+*.db.*.bak
+
+# 日志
+*.log
+logs/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Electron Builder 中间产物
+*.asar
+.electron-builder/
+
+# 本地环境变量
+.env
+.env.local
+
+# 工具临时文件
+.workbuddy/tmp-*

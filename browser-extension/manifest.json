@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "TodoPulse加入待办",
+  "version": "1.4.0",
+  "description": "一键收藏网页内容到TodoPulse桌面待办，支持自定义脚本抓取网页内容",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "TodoPulse 设置",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval'"
+  },
+  "sandbox": {
+    "pages": [
+      "sandbox.html"
+    ]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sandbox.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "use_dynamic_url": true
+    }
+  ]
+}

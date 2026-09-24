@@ -1,0 +1,6 @@
+#!/bin/sh
+# prerm script for TodoPulse
+set -e
+# �����û��TodoPulsectron-todo-uos
+echo "TodoPulse removed. User data preserved."
+exit 0

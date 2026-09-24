@@ -1,0 +1,57 @@
+appId: com.sapiens.todo-uos
+productName: TodoPulse
+executableName: todopulse
+npmRebuild: false
+directories:
+  buildResources: build
+  output: dist-electron
+files:
+  - src-main/**/*
+  - src-renderer/dist/**/*
+  - src-renderer/assets/**/*
+  - browser-extension/**/*
+  - node_modules/**/*
+  - package.json
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/better-sqlite3/**/*'
+extraResources:
+  - from: browser-extension
+    to: browser-extension
+    filter:
+      - '**/*'
+linux:
+  target:
+    - target: deb
+      arch: [x64]
+  category: Office
+  maintainer: sapiens-ai
+  vendor: Sapiens AI
+  icon: build/icons
+  artifactName: TodoPulse-${version}-${arch}.deb
+  synopsis: TodoPulse - 待办事项管理工具
+  description: |
+    运行在统信UOS上的桌面Todo应用，支持浏览器扩展一键收藏网页内容生成待办。
+    - 本地SQLite存储，数据完全本地化
+    - 自然语言时间解析（chrono-node）
+    - 浏览器扩展一键收藏网页选中文本
+    - 暗色/亮色主题切换
+    - UOS系统通知兼容
+deb:
+  depends:
+    - libnotify4
+    - libnss3
+    - libgtk-3-0
+    - libxss1
+    - libasound2
+    - libxtst6
+    - libgbm1
+    - libdrm2
+    - libx11-xcb1
+    - libxcb-dri3-0
+    - libatk1.0-0
+    - libatk-bridge2.0-0
+    - libcups2
+  priority: optional
+asar: true
+compression: maximum
