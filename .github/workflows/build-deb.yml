@@ -1,0 +1,150 @@
+name: Build UOS20 deb
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  npm_config_registry: https://registry.npmjs.org/
+  npm_config_replace_registry_host: always
+  DEBIAN_FRONTEND: noninteractive
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build deb (Debian 10 / glibc 2.28)
+    runs-on: ubuntu-latest
+    # UOS 20 基于 Debian 10；原生模块必须在同版本 glibc 下编译，否则目标机报 GLIBC_2.xx not found
+    container: debian:10
+    steps:
+      - name: Configure Debian 10 archive sources
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main
+          deb http://archive.debian.org/debian-security buster/updates main
+          EOF
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends build-essential python3 git ca-certificates xz-utils
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Install dependencies without building SQLite for host Node
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild electron esbuild
+
+      - name: Run tests
+        run: npm test
+
+      - name: Rebuild better-sqlite3 for Electron from source
+        run: npm run rebuild:native -- --build-from-source
+
+      - name: Build deb
+        run: npm run dist
+
+      - name: Check binaries require glibc <= 2.28
+        run: |
+          fail=0
+          mapfile -d '' binaries < <(find dist-electron/linux-unpacked -name '*.node' -print0)
+          test "${#binaries[@]}" -gt 0
+          binaries+=(dist-electron/linux-unpacked/todopulse)
+          for f in "${binaries[@]}"; do
+            symbols=$(objdump -T "$f")
+            v=$(printf '%s\n' "$symbols" | sed -n 's/.*(GLIBC_\([0-9.]*\)).*/\1/p' | sort -V | tail -1)
+            test -n "$v"
+            echo "$f -> GLIBC_$v"
+            if [ "$(printf '%s\n2.28\n' "$v" | sort -V | tail -1)" != "2.28" ]; then
+              echo "::error file=$f::requires GLIBC_$v (> 2.28)"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TodoPulse-deb
+          path: dist-electron/*.deb
+          if-no-files-found: error
+
+  verify:
+    name: Install & smoke test on Debian 10
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:10
+    steps:
+      - name: Configure Debian 10 archive sources
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main
+          deb http://archive.debian.org/debian-security buster/updates main
+          EOF
+          apt-get -o Acquire::Check-Valid-Until=false update
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: TodoPulse-deb
+          path: deb
+
+      - name: Install deb with its declared dependencies
+        run: apt-get install -y ./deb/TodoPulse-*.deb
+
+      - name: Smoke test Electron runtime and native module
+        run: |
+          APP=/opt/TodoPulse
+          test -x "$APP/todopulse"
+          test -f "$APP/resources/browser-extension/manifest.json"
+          cat > /tmp/smoke.js <<'EOF'
+          const Database = require('/opt/TodoPulse/resources/app.asar/node_modules/better-sqlite3');
+          const db = new Database(':memory:');
+          const { v } = db.prepare('select sqlite_version() as v').get();
+          db.close();
+          console.log('electron', process.versions.electron, '| sqlite', v);
+          EOF
+          ELECTRON_RUN_AS_NODE=1 "$APP/todopulse" /tmp/smoke.js
+
+  release:
+    name: Publish GitHub Release
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TodoPulse-deb
+          path: deb
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: deb/*.deb
+          fail_on_unmatched_files: true
+          generate_release_notes: true

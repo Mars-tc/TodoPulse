@@ -168,7 +168,7 @@
     <div>
       <h1>TodoPulse 用户使用手册</h1>
       <p>统信 UOS 桌面待办应用，配套 Chromium 浏览器扩展，可一键将网页内容收藏为待办事项。本手册面向最终使用者，按"点哪、填什么、怎么用"逐步讲解全部功能。</p>
-      <span class="badge">版本 v1.4.0 · 支持 x86_64 · 离线可用</span>
+      <span class="badge">版本 v1.4.1 · 支持 x86_64 · 离线可用</span>
     </div>
     <button class="theme-toggle" id="themeToggle">🌙 切换深色</button>
   </div>
@@ -237,11 +237,9 @@
 
       <h3>安装应用（UOS）</h3>
       <ol class="steps">
-        <li>获取安装包 <code>dist-electron/*.deb</code>（由开发侧 <code>npm run dist</code> 打包生成）。</li>
-        <li>打开终端，执行安装命令：<pre><code>sudo dpkg -i dist-electron/*.deb
-# 或
-sudo apt install ./dist-electron/*.deb</code></pre></li>
-        <li>安装脚本会在 <code>${HOME}/.config/TodoPulse</code> 创建数据目录，扩展目录为 <code>/opt/TodoPulse/resources/browser-extension/</code>。</li>
+        <li>从 <a href="https://github.com/Mars-tc/TodoPulse">GitHub 仓库</a>的 <strong>Releases</strong> 下载目标版本的 x64 deb。该包由 Actions 在 Debian 10 环境构建并完成安装验证；若从 Actions 的 Artifacts 下载 ZIP，请先解压取得 deb。</li>
+        <li>在下载目录打开终端，执行安装命令（文件名以实际下载版本为准）：<pre><code>sudo apt install ./TodoPulse-1.4.1-amd64.deb</code></pre>apt 会自动安装声明的运行依赖。</li>
+        <li>数据目录在应用首次启动时创建，通常为 <code>~/.config/TodoPulse</code>；扩展目录为 <code>/opt/TodoPulse/resources/browser-extension/</code>。无需安装 Node.js 或执行原生模块重建。</li>
       </ol>
 
       <h3>首次启动与获取端口 / Token</h3>
@@ -588,7 +586,7 @@ return {
       <h2><span class="num">12</span>常见问题 FAQ</h2>
 
       <h4>Q：better-sqlite3 原生模块错误？</h4>
-      <p>A：UOS 下安装后若报错 <code>Unable to find native module</code>，执行 <code>npm exec electron-rebuild -f -w better-sqlite3</code>（或 <code>npx electron-rebuild -f -w better-sqlite3</code>）。</p>
+      <p>A：正式 deb 包已包含针对 Debian 10 / Electron 编译的 SQLite 模块，无需重建。请确认使用 Releases 提供的 x64 包；若仍报错，请反馈包版本、系统架构及完整错误。若提示 <code>GLIBC_2.xx not found</code>，不要手动替换系统 glibc，请改用兼容构建。只有源码开发环境才需要执行 <code>npm run rebuild:native</code>。</p>
 
       <h4>Q：扩展无法连接 / 提示未配置端口或 Token？</h4>
       <p>A：确认 TodoPulse 已启动；在扩展弹窗中填入从 <code>~/.config/TodoPulse/config.json</code>（或应用内 🧩 指南弹窗）读取的 <code>port</code> 与 <code>token</code>，点击「测试连接并保存」。</p>
@@ -620,7 +618,7 @@ return {
 </div>
 
 <footer>
-  TodoPulse 用户使用手册 · v1.4.0 · 本页为单文件离线文档，可直接双击打开。<br>
+  TodoPulse 用户使用手册 · v1.4.1 · 本页为单文件离线文档，可直接双击打开。<br>
   配套技术文档：<code>README.md</code>
 </footer>
 

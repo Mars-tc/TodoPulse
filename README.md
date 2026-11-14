@@ -36,6 +36,24 @@
 - **不透明度**：60%–100% 可调，鼠标悬停时自动恢复 100%，兼顾常驻不遮挡与可读性。
 - **数据同步**：主窗口新增 / 修改 / 删除待办后，悬浮窗自动刷新（数据变更广播至所有窗口）；反之亦然。
 
+### 任务模板与工作流
+
+- **模板库管理页**：侧边栏「🧰 模板库」、顶栏图标或托盘菜单均可进入，左侧模板列表 + 右侧编辑器，支持新建、复制、删除、启用 / 停用、设置颜色与图标。
+- **模板内容结构**：模板名称（即生成待办的标题模板）+ 描述 + 条目清单；条目既可作为子任务落地（单条模式），也可各自展开为独立待办（清单预设模式）。
+- **默认属性**：默认分类、优先级、提醒提前量、重复规则、精力档位、四象限归属、相对截止日偏移（今天起算 N 天）。
+- **变量占位**：标题与描述支持 `{date}` `{today}` `{tomorrow}` `{weekday}` `{category}` 占位符，生成时按目标日期与分类自动替换；未知占位符原样保留。
+- **一键生成**：模板库内直接生成，或用 `Ctrl+Shift+T` 唤起「模板快速选择面板」（命令面板式浮层，↑↓ 选择、Enter 生成、Esc 关闭）；快速添加条（`Ctrl+Shift+A`）内也提供「🧰 模板」下拉。
+- **内置模板保护**：内置模板只读、不可删除，仅可复制为自定义模板。
+
+### 智能规划排期
+
+- **四象限视图**：2×2 网格展示待办（Q1 重要且紧急 / Q2 重要不紧急 / Q3 不重要但紧急 / Q4 不重要不紧急），未归类项单独归集；卡片支持跨象限拖拽改归属。
+- **自动建议象限**：按优先级与截止时间距离推导建议值并给出理由文案，仅作提示，采纳后才写入；已归类的条目不会被建议覆盖。
+- **今日排期面板**：按「象限优先级 → 精力时段匹配 → 每日容量上限」排出今日执行清单，每项给出被排入原因；顶部展示已排时长与容量占用进度条，超出容量的条目顺延提示。
+- **精力档位与时段**：每条待办可标注高 / 中 / 低精力档位；设置中的精力时段表（上午高能 / 午后中等 / 晚间低能等）决定时段偏好匹配。
+- **逾期顺延**：支持「顺延到今天 / 顺延到下一个工作日（跳过周末）/ 仅标记不改动」三种策略，可在规划页手动一键顺延；也可在设置中开启逾期自动顺延（默认关闭，挂在既有提醒扫描周期内执行）。
+- **规划设置**：设置中心新增「🧭 智能规划」分组，集中配置每日容量、默认预估耗时、紧急阈值、精力时段表、自动顺延开关与策略。
+
 ### 设置中心
 
 - **外观主题**：浅色 / 深色 / 跟随系统（随系统主题实时变化）、界面密度（紧凑 / 舒适）、字号（常规 / 大 / 特大），即时生效。字号通过全局 `--font-scale` 变量缩放（所有字号均以 `calc(Npx * var(--font-scale))` 声明，基准值 1 / 1.12 / 1.24）。
@@ -62,6 +80,7 @@
 
 ```
 TodoPulse/
+├── .github/workflows/build-deb.yml  # Debian 10 构建、安装验证与 tag 发布
 ├── src-main/                 # Electron 主进程
 │   ├── main.js               # Electron 入口（窗口、托盘、通知、IPC）
 │   ├── db.js                 # better-sqlite3 封装（v2 增量迁移、分类、子任务、统计、导入导出）
@@ -73,8 +92,10 @@ TodoPulse/
 │   ├── widget_window.js      # 到期悬浮窗：创建/显示/隐藏/位置记忆/越界校正
 │   ├── time_parser.js        # chrono-node 时间解析（中文简体 + 英文）
 │   ├── repeat_rule.js        # 重复规则日期计算（主进程生成 + 界面预览的单一来源）
+│   ├── template_engine.js    # 模板展开算法（占位符替换 / 相对截止日 / 清单预设）
+│   ├── quadrant_planner.js   # 象限与排期算法（象限建议 / 分桶 / 今日排期 / 逾期顺延）
 │   └── preload.js            # 预加载脚本（contextBridge 暴露 API）
-├── tests/                    # 纯逻辑测试（node tests/*.test.cjs）
+├── tests/                    # 纯逻辑测试（node tests/run_all.cjs 汇总执行）
 ├── src-renderer/             # Vue3 + Vite 渲染层
 │   ├── index.html            # 主窗口入口
 │   ├── widget.html           # 悬浮窗入口（独立多入口）
@@ -93,9 +114,15 @@ TodoPulse/
 │       │   ├── StatsPanel.vue        # 统计面板（SVG 手写图表）
 │       │   ├── TrashView.vue         # 回收站视图
 │       │   ├── SettingsPanel.vue     # 设置中心（分组导航 + 内容区）
-│       │   ├── settings/             # 设置分组：外观 / 提醒 / 服务与扩展 / 启动关闭 / 数据 / 悬浮窗 / 关于
+│       │   ├── settings/             # 设置分组：外观 / 提醒 / 服务与扩展 / 启动关闭 / 自动分类 / 智能规划 / 数据 / 悬浮窗 / 关于
 │       │   ├── ScriptManager.vue     # 网页脚本管理页（左列表 + 右编辑器）
 │       │   ├── ScriptEditor.vue      # 单条脚本编辑（规则 / 选择器 / JS 代码）
+│       │   ├── TemplateManager.vue   # 模板库管理页（左列表 + 右编辑）
+│       │   ├── TemplateEditor.vue    # 单条模板编辑（属性 / 条目清单）
+│       │   ├── TemplatePicker.vue    # 模板快速选择面板（命令面板式浮层）
+│       │   ├── PlanningView.vue      # 智能规划视图（四象限 + 今日排期双栏）
+│       │   ├── QuadrantView.vue      # 四象限网格（拖拽改象限）
+│       │   ├── PlanPanel.vue         # 今日排期面板（容量条 / 排期清单 / 逾期顺延）
 │       │   ├── SubtaskList.vue       # 子任务清单编辑
 │       │   ├── RepeatRuleEditor.vue  # 重复规则编辑器
 │       │   └── ToastHost.vue         # 全局提示 + 撤销删除
@@ -106,6 +133,8 @@ TodoPulse/
 │       │   ├── useTheme.js           # 三态主题 / 密度 / 字号
 │       │   ├── useSettings.js        # 设置单例与保存
 │       │   ├── useScripts.js         # 网页脚本单例与增删改查
+│       │   ├── useTemplates.js       # 模板单例与增删改查 / 一键生成
+│       │   ├── usePlanning.js        # 四象限 / 今日排期 / 逾期清单单例
 │       │   └── useToast.js           # 全局提示队列
 │       ├── utils/highlight.js        # 安全转义 + 关键词高亮
 │       └── styles/
@@ -116,7 +145,7 @@ TodoPulse/
 │   ├── background.js         # Service Worker（转发请求到本地服务、拉取并缓存脚本）
 │   ├── content-script.js     # 网页悬浮「加入待办」面板 + 脚本匹配与提取
 │   └── sandbox.html / sandbox.js  # 用户 JS 执行沙箱（MV3 下唯一允许 eval 的环境）
-├── deb-pkg/                  # deb 打包辅助脚本（postinst / prerm）
+├── deb-pkg/                  # 历史 deb 辅助脚本（未接入当前打包）
 ├── electron-builder.yml      # Electron Builder 配置（打包配置的唯一来源）
 ├── install.ps1               # Windows 安装辅助脚本
 ├── kill-node.ps1             # 开发辅助脚本
@@ -132,24 +161,26 @@ TodoPulse/
 | 浏览器扩展 | Chrome Manifest V3（Service Worker + Content Script） |
 | 打包 | electron-builder（deb / x64） |
 
-## 快速启动
+## 本机开发与测试
+
+Windows 用于开发和测试，UOS 20 / Debian 10 x64 安装包由 GitHub Actions 构建。统一使用 npm 与 `package-lock.json`，不再维护 pnpm 锁文件。
 
 ### 安装依赖
 
+建议使用 Node.js 22（CI 使用相同主版本）；Node.js 24 可运行现有测试。需要网络以下载 Electron 和原生模块，若必须从源码编译，Windows 还需要 Python 和 Visual Studio C++ Build Tools。
+
 ```bash
 cd TodoPulse
-npm install
+npm ci --ignore-scripts --registry=https://registry.npmjs.org/
+npm rebuild electron esbuild --registry=https://registry.npmjs.org/
+npm run rebuild:native
 ```
 
-> **UOS 下编译 better-sqlite3 原生模块：**
-> 如果安装后报错 `Unable to find native module`，执行：
-> ```bash
-> npm run rebuild:native
-> ```
-> 或：
-> ```bash
-> npx electron-rebuild -f -w better-sqlite3
-> ```
+先跳过安装脚本，避免 `better-sqlite3` 被编译为宿主 Node 的 ABI；随后安装 Electron / esbuild 二进制，并用 `@electron/rebuild` 将 SQLite 模块重建为 Electron ABI。正式 deb 包已包含原生模块，最终用户无需安装 Node 或执行重建。
+
+若 Electron 下载因无法访问 GitHub 而超时，可临时设置环境变量 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 后重试 `npm rebuild electron esbuild`；安装器仍校验下载文件的 SHA-256。该变量只用于 Electron 下载，不影响 git 推送，CI 保持默认官方下载源。
+
+若提示缺少 `@rollup/rollup-win32-x64-msvc` 或 `@esbuild/win32-x64`，先确认没有禁用 npm 的 optional dependencies，再执行 `npm ci --ignore-scripts --include=optional --registry=https://registry.npmjs.org/` 并重复后两步。请勿复制 Linux 的 `node_modules` 到 Windows，也不要在 Electron 重建后单独执行 `npm rebuild better-sqlite3`。
 
 ### 运行测试
 
@@ -157,26 +188,61 @@ npm install
 npm test
 ```
 
-当前覆盖重复规则日期计算（月末溢出、逾期补勾、`interval` 边界等），为纯逻辑测试，不依赖原生模块。
+8 个测试套件由 `tests/run_all.cjs` 自动发现并汇总，覆盖配置持久化与损坏恢复、HTTP 鉴权和输入校验、主进程服务生命周期、提醒、重复规则、模板展开、象限排期及数据库 SQL 契约。逻辑测试不直接加载 `better-sqlite3`；数据层契约测试使用 Node 内置 `node:sqlite`，不可用时会明确输出跳过提示。CI 的 Debian 10 安装验证另行测试真实 Electron / SQLite 原生模块。
 
 ### 开发模式运行
 
 ```bash
-# 方式1：先构建前端，再启动 Electron
+# 热更新：启动本机 Vite 和 Electron
+npm run dev:electron
+
+# 或验证生产构建
 npm run build
 npm run electron:dev
-
-# 方式2：同时热更新（需 concurrently）
-npm run dev:electron
 ```
 
-### 打包 deb 包（在 Linux / UOS 环境执行）
+Vite 仅监听本机 `127.0.0.1:5173`。退出应用请使用托盘菜单「退出」，关闭主窗口默认只是最小化到托盘。
+
+## 持续集成与发布
+
+工作流为 `.github/workflows/build-deb.yml`，目标为 UOS 20（Debian 10、glibc 2.28、x86_64）。不在 Windows 跨平台打包，也不在新版 Ubuntu 直接编译原生模块，以免产物要求高于 UOS 20 的 glibc 版本。
+
+| Job | 环境与验证 |
+|-----|------------|
+| `build` | Debian 10 容器、Node 22；`npm ci` 锁定依赖，运行测试，强制从源码为 Electron 编译 SQLite，构建 deb，检查 Electron 和 `.node` 的 glibc 要求不高于 2.28 |
+| `verify` | 全新 Debian 10 容器；通过 apt 安装 deb 及声明依赖，运行包内 Electron 加载 SQLite 并查询内存数据库，检查随包浏览器扩展 |
+| `release` | 仅 `v*` tag 且前两步成功时发布 GitHub Release，附加 deb 和自动生成的更新说明 |
+
+触发条件：推送 `master`、发往 `master` 的 PR、推送 `v*` tag，以及 Actions 页面手动运行。构建产物位于运行页面的 **Artifacts → TodoPulse-deb**；发布包位于仓库 **Releases**。首次推送前需允许仓库运行 GitHub Actions；发布 job 使用仓库提供的 `GITHUB_TOKEN`，无需配置个人访问令牌。
+
+Debian 10 已停止维护，工作流使用归档 apt 源并在更新时关闭过期日期检查，但仍验证软件包签名。此容器仅用于兼容性构建，不代表系统或 Electron 28 仍获得安全支持；桌面、托盘、通知和窗口管理器行为仍需在真实 UOS 20 上验收。
+
+### 发布版本
+
+1. 更新 `package.json` 的版本、运行 `npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org/` 同步锁文件，再更新 README 更新日志和用户手册版本。
+2. 本机运行 `npm test`、`npm run build` 并测试 Electron 后，提交并推送 `master`，等待 `build` / `verify` 成功。
+3. 创建与 `package.json` 一致的版本 tag；不一致会阻止构建和发布：
 
 ```bash
+git tag v1.4.1
+git push origin v1.4.1
+```
+
+tag 工作流验证通过后自动发布 Release。普通分支构建不会发布，`npm run dist` 也关闭 electron-builder 的隐式发布。
+
+### Linux 本地打包（可选）
+
+仅在 Debian 10 / UOS 20 x64 构建环境中执行，需 Python、C++17 工具链及打包依赖：
+
+```bash
+npm ci --ignore-scripts
+npm rebuild electron esbuild
+npm test
+npm run rebuild:native -- --build-from-source
 npm run dist
 ```
 
-打包产物输出至 `dist-electron/` 目录。
+产物输出到 `dist-electron/`。无法保证在较新的 Linux 系统构建的 deb 与 UOS 20 兼容；推荐使用上述 Actions 工作流。
 
 ## 本地 HTTP API
 
@@ -256,14 +322,15 @@ X-Todo-Token: <config.json 中的 token>
 
 ## UOS 安装与运行
 
+在 [GitHub 仓库](https://github.com/Mars-tc/TodoPulse) 的 **Releases** 下载目标版本的 x64 deb（Actions 构建产物需先解压下载的 ZIP）。在 deb 所在目录安装，例如：
+
 ```bash
-sudo dpkg -i dist-electron/*.deb
-# 或
-sudo apt install ./dist-electron/*.deb
+sudo apt install ./TodoPulse-1.4.1-amd64.deb
 ```
 
-安装脚本会在 `${HOME}/.config/TodoPulse` 创建数据目录，扩展目录为
-`/opt/TodoPulse/resources/browser-extension/`。
+以实际下载文件名为准；apt 会自动安装声明的运行依赖。也可使用 `sudo dpkg -i <安装包.deb>`，缺少依赖时再执行 `sudo apt-get -f install`。
+
+数据目录由应用首次启动创建，UOS 通常为 `~/.config/TodoPulse`，扩展目录为 `/opt/TodoPulse/resources/browser-extension/`。安装和升级不需要执行源码中的 `deb-pkg/` 脚本。
 
 ### 首次使用
 
@@ -360,7 +427,7 @@ return {
 ## 常见问题
 
 **Q: better-sqlite3 原生模块错误**
-A: 执行 `npm exec electron-rebuild -f -w better-sqlite3`（或 `npx electron-rebuild -f -w better-sqlite3`）。
+A: 开发环境执行 `npm run rebuild:native`；Actions 构建的正式 deb 已包含为 Debian 10 / Electron 编译的模块，无需用户重建。若正式包仍报错，请检查是否下载了 x64 包，并反馈包版本、系统架构和完整错误；出现 `GLIBC_2.xx not found` 通常说明使用了来自较新系统的非兼容构建。
 
 **Q: 扩展无法连接 / 提示未配置端口或 Token**
 A: 确认 TodoPulse 已启动；点击扩展图标，在弹窗中填入从 `~/.config/TodoPulse/config.json`（或应用内 🧩 指南弹窗）读取的 `port` 与 `token`，点击「测试连接并保存」。
@@ -386,7 +453,7 @@ A: 不会。结构升级为增量迁移，且首次升级会自动生成 `todos.
 ## 打包配置
 
 打包配置以 `electron-builder.yml` 为**唯一来源**（`package.json` 中不再重复 `build` 字段，避免两处漂移）。
-`files` 已包含 `src-renderer/assets/**`（托盘与窗口图标）与 `browser-extension/**`。
+`files` 已包含 `src-renderer/assets/**`（托盘与窗口图标）与 `browser-extension/**`。`npmRebuild: false` 表示打包器不会重建原生模块；CI 必须在打包前执行 `npm run rebuild:native -- --build-from-source`。构建目标为 deb / x64，发布只由 Actions 的 `release` job 负责。
 
 ## 开发计划
 
@@ -430,3 +497,15 @@ A: 不会。结构升级为增量迁移，且首次升级会自动生成 `todos.
 - 新增 `.gitignore` 与 git 仓库；打包配置收敛到 `electron-builder.yml` 单一来源。
 - 新增 `tests/` 与 `npm test`；新增 `npm run rebuild:native`。
 - 开发服务器不再对局域网开放（`127.0.0.1`）。
+- 新增 GitHub Actions：在 Debian 10 / glibc 2.28 容器中构建 UOS 20 x64 deb，检查原生二进制兼容性，在干净容器安装验证后才允许 tag 发布 GitHub Release。
+- 统一 npm 锁文件，将原生重建工具迁移至 `@electron/rebuild ~3.6.2`（node-gyp 9 兼容 Debian 10 的 Python 3.7），移除过期 pnpm 文件；同步本机开发、CI 发布和用户安装说明。
+
+## 后续规划
+
+本轮交付为「可扩展底座 + 端到端最小可用链路」，以下增强项已预留扩展点，后续批次逐步填充：
+
+- **模板增强**：条件规则（按优先级 / 分类触发不同模板）、循环清单模板（每周 / 每月重复的清单预设）、模板导入导出、模板变量扩展（如 `{week}` `{month}` `{count}`）。
+- **规划增强**：排期结果按天回写 `planned_at` / `planned_order`、排期统计图表（专注时长趋势、象限分布随时间变化）、把模板与四象限打通（模板可直接指定象限与精力档位，已支持字段但未做联动 UI）。
+- **数据增强**：新增字段（象限 / 精力档位 / 计划日 / 预估耗时）尚未进入 `AddEditModal` 表单与 CSV 导出，暂只由规划视图维护。
+- **本地 HTTP API**：模板与规划相关能力暂未开放为 HTTP 接口（浏览器扩展仍只走原有待办接口）。
+
