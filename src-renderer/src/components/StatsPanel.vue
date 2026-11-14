@@ -19,6 +19,14 @@
         </div>
       </div>
 
+      <!-- 快捷跳转 -->
+      <div class="quick-jumps">
+        <button class="qj" @click="$emit('goto', 'view-overdue')">⚠️ 逾期 {{ stats.overdue }} 项</button>
+        <button class="qj" @click="$emit('goto', 'view-today')">📅 今天</button>
+        <button class="qj" @click="$emit('goto', 'view-week')">📆 本周</button>
+        <button class="qj" @click="$emit('goto', 'view-pending')">⏳ 待完成</button>
+      </div>
+
       <!-- 趋势 -->
       <section class="card" style="animation-delay: 240ms">
         <h3>近 7 天趋势</h3>
@@ -34,18 +42,15 @@
                 <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
               </linearGradient>
             </defs>
-
             <line v-for="g in 4" :key="g"
               :x1="0" :x2="W"
               :y1="(H / 4) * (g - 1)" :y2="(H / 4) * (g - 1)"
               stroke="var(--border-color)" stroke-width="1" />
-
             <path v-if="areaPath" :d="areaPath" fill="url(#areaCreated)" />
             <path v-if="createdPath" :d="createdPath" fill="none" stroke="#3b82f6" stroke-width="2.2"
               stroke-linecap="round" stroke-linejoin="round" />
             <path v-if="donePath" :d="donePath" fill="none" stroke="#16a34a" stroke-width="2.2"
               stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3" />
-
             <g v-for="(p, i) in createdPoints" :key="'c' + i">
               <circle :cx="p.x" :cy="p.y" r="3.4" fill="#3b82f6" stroke="var(--bg-primary)" stroke-width="1.6"
                 @mouseenter="hover = { i, type: 'created' }" @mouseleave="hover = null" />
@@ -55,12 +60,10 @@
                 @mouseenter="hover = { i, type: 'completed' }" @mouseleave="hover = null" />
             </g>
           </svg>
-
           <div v-if="hover" class="tooltip" :style="tooltipStyle">
             {{ trend[hover.i].date }} · {{ hover.type === 'created' ? '新增' : '完成' }}
             <b>{{ hover.type === 'created' ? trend[hover.i].created : trend[hover.i].completed }}</b>
           </div>
-
           <div class="x-axis">
             <span v-for="d in trend" :key="d.date">{{ d.date }}</span>
           </div>
@@ -108,6 +111,30 @@
           </div>
         </section>
       </div>
+
+      <!-- 导出按钮 -->
+      <div class="export-section">
+        <button class="btn-export" @click="exportCSV">📤 导出 CSV</button>
+        <p class="export-note">CSV 将保存至桌面</p>
+      </div>
+
+      <!-- 逾期预警卡片 -->
+      <div v-if="overdueWarn.length > 0" class="warn-card">
+        <div class="warn-header">
+          <span class="warn-icon">⚠️</span>
+          <span class="warn-title">逾期预警</span>
+          <span class="warn-count">{{ stats.overdue }} 项逾期</span>
+        </div>
+        <div class="warn-list">
+          <div v-for="t in overdueWarn" :key="t.id" class="warn-item" @click="$emit('goto', `view:${t.id}`)">
+            <span class="warn-days" :style="{ color: t.days >= 7 ? 'var(--danger)' : t.days >= 3 ? 'var(--warning)' : '#eab308' }">
+              {{ t.days >= 7 ? '🔴' : t.days >= 3 ? '🟠' : '🟡' }} +{{ t.days }}天
+            </span>
+            <span class="warn-text">{{ t.title }}</span>
+          </div>
+        </div>
+        <button class="warn-more" @click="$emit('goto', 'view-overdue')">查看全部逾期 →</button>
+      </div>
     </div>
   </div>
 </template>
@@ -115,7 +142,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 
-defineEmits(['back'])
+defineEmits(['back', 'goto'])
 
 const W = 560
 const H = 150
@@ -124,10 +151,25 @@ const circumference = 2 * Math.PI * 46
 const loading = ref(true)
 const stats = ref({ total: 0, completed: 0, pending: 0, overdue: 0, completionRate: 0, trend: [], priority: { high: 0, medium: 0, low: 0 }, categories: [], uncategorized: 0 })
 const hover = ref(null)
+const overdueWarn = ref([])
 
 onMounted(async () => {
   try {
-    stats.value = await window.electronAPI.getStats()
+    const [s, todos] = await Promise.all([
+      window.electronAPI.getStats(),
+      window.electronAPI.getTodos({ filter: { completed: false } })
+    ])
+    stats.value = s || {}
+    // 逾期预警：逾期天数最多的3条
+    const now = new Date().toISOString()
+    overdueWarn.value = (todos || [])
+      .filter(t => t.deadline && t.deadline < now)
+      .map(t => ({
+        ...t,
+        days: Math.floor((new Date(now) - new Date(t.deadline)) / 86400000)
+      }))
+      .sort((a, b) => b.days - a.days)
+      .slice(0, 3)
   } catch (e) {
     console.error('[StatsPanel] 加载统计失败:', e.message)
   } finally {
@@ -154,7 +196,7 @@ function scaleX(i, len) {
 }
 
 const maxTrend = computed(() => {
-  const m = Math.max(...trend.value.map((d) => Math.max(d.created, d.completed)), 1)
+  const m = Math.max(...trend.value.map(d => Math.max(d.created, d.completed)), 1)
   return m
 })
 
@@ -197,36 +239,35 @@ const priorityRows = computed(() => {
 })
 
 const donutSegments = computed(() => {
-  const cats = (stats.value.categories || []).map((c) => ({ name: c.name, color: c.color, count: c.count || 0 }))
+  const cats = (stats.value.categories || []).map(c => ({ name: c.name, color: c.color, count: c.count || 0 }))
   if (stats.value.uncategorized) cats.push({ name: '未分类', color: '#94a3b8', count: stats.value.uncategorized })
-
   const total = cats.reduce((s, c) => s + c.count, 0)
   if (!total) return []
-
   let offset = 0
-  return cats
-    .filter((c) => c.count > 0)
-    .map((c) => {
-      const len = (c.count / total) * circumference
-      const seg = { ...c, len, offset }
-      offset += len
-      return seg
-    })
+  return cats.filter(c => c.count > 0).map(c => {
+    const len = (c.count / total) * circumference
+    const seg = { ...c, len, offset }
+    offset += len
+    return seg
+  })
 })
+
+function exportCSV() {
+  window.electronAPI.exportCsv().then(buf => {
+    window.electronAPI.saveFile('', buf, 'TodoPulse-统计-' + new Date().toISOString().slice(0, 10) + '.csv')
+      .then(path => pushToast({ message: `已导出：${path}`, type: 'success' }))
+      .catch(e => pushToast({ message: '导出失败：' + (e?.message || '未知错误'), type: 'error' }))
+  }).catch(e => pushToast({ message: '导出失败：' + (e?.message || '未知错误'), type: 'error' }))
+}
 </script>
 
 <style scoped>
 .stats-panel { display: flex; flex-direction: column; gap: 14px; height: 100%; overflow: hidden }
 .stats-head { display: flex; align-items: center; gap: 14px }
 .back-btn {
-  padding: 6px 14px;
-  border: 1px solid var(--border-color);
-  border-radius: 9px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: calc(12.5px * var(--font-scale));
-  cursor: pointer;
-  transition: all 0.18s ease;
+  padding: 6px 14px; border: 1px solid var(--border-color); border-radius: 9px;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  font-size: calc(12.5px * var(--font-scale)); cursor: pointer; transition: all 0.18s ease;
 }
 .back-btn:hover { border-color: var(--accent-color); color: var(--accent-color); transform: translateX(-2px) }
 .stats-head h2 { margin: 0; font-size: calc(17px * var(--font-scale)); color: var(--text-primary) }
@@ -236,35 +277,31 @@ const donutSegments = computed(() => {
 
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px }
 .metric-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 14px; animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .metric-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px var(--shadow-color) }
 @keyframes rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
-.metric-icon {
-  width: 38px; height: 38px;
-  border-radius: 11px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: calc(17px * var(--font-scale));
-  flex-shrink: 0;
-}
+.metric-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: calc(17px * var(--font-scale)); flex-shrink: 0 }
 .metric-main { display: flex; flex-direction: column; min-width: 0 }
 .metric-value { font-size: calc(21px * var(--font-scale)); font-weight: 700; line-height: 1.2 }
 .metric-label { font-size: calc(11.5px * var(--font-scale)); color: var(--text-muted) }
 
+/* 快捷跳转 */
+.quick-jumps { display: flex; gap: 8px; flex-wrap: wrap }
+.qj {
+  padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border-color);
+  background: var(--bg-secondary); color: var(--text-secondary);
+  font-size: calc(12px * var(--font-scale)); cursor: pointer; transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.qj:hover { border-color: var(--accent-color); color: var(--accent-color); background: var(--accent-soft) }
+
 .card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  padding: 14px 16px 16px;
-  animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 14px; padding: 14px 16px 16px; animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .card h3 { margin: 0 0 10px; font-size: calc(13.5px * var(--font-scale)); font-weight: 600; color: var(--text-secondary) }
 .legend { display: flex; gap: 14px; font-size: calc(11.5px * var(--font-scale)); color: var(--text-muted); margin-bottom: 6px }
@@ -275,15 +312,9 @@ const donutSegments = computed(() => {
 .chart circle { cursor: pointer; transition: r 0.15s ease }
 .chart circle:hover { r: 5 }
 .tooltip {
-  position: absolute;
-  transform: translateY(-130%);
-  padding: 4px 9px;
-  border-radius: 7px;
-  background: rgba(15, 23, 42, 0.9);
-  color: #f8fafc;
-  font-size: calc(11.5px * var(--font-scale));
-  white-space: nowrap;
-  pointer-events: none;
+  position: absolute; transform: translateY(-130%); padding: 4px 9px; border-radius: 7px;
+  background: rgba(15, 23, 42, 0.9); color: #f8fafc; font-size: calc(11.5px * var(--font-scale));
+  white-space: nowrap; pointer-events: none;
 }
 .tooltip b { color: #fbbf24 }
 .x-axis { display: flex; justify-content: space-between; font-size: calc(10.5px * var(--font-scale)); color: var(--text-muted); margin-top: 4px }
@@ -306,6 +337,42 @@ const donutSegments = computed(() => {
 .donut-legend i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0 }
 .donut-legend span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .donut-legend b { color: var(--text-primary) }
+
+.export-section { display: flex; align-items: center; gap: 10px; padding: 4px 0 }
+.btn-export {
+  padding: 7px 16px; border: 1px solid var(--border-color); border-radius: 9px;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  font-size: calc(12.5px * var(--font-scale)); cursor: pointer; transition: all 0.18s ease;
+}
+.btn-export:hover { border-color: var(--accent-color); color: var(--accent-color) }
+.export-note { font-size: calc(11.5px * var(--font-scale)); color: var(--text-muted); margin: 0 }
+
+/* 逾期预警 */
+.warn-card {
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 14px; padding: 18px;
+}
+.warn-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px }
+.warn-icon { font-size: 18px }
+.warn-title { font-size: 13px; font-weight: 600; color: var(--text-primary) }
+.warn-count {
+  margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(220, 38, 38, 0.15); color: var(--danger);
+}
+.warn-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px }
+.warn-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--bg-primary); border: 1px solid var(--border-color);
+  border-radius: 8px; cursor: pointer; transition: border-color 0.15s ease;
+}
+.warn-item:hover { border-color: var(--warning) }
+.warn-days { font-size: 11px; font-weight: 600; white-space: nowrap; min-width: 58px }
+.warn-text { flex: 1; font-size: 12.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.warn-more {
+  width: 100%; padding: 7px; border: 1px dashed var(--border-color); border-radius: 8px;
+  background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; transition: all 0.15s ease;
+}
+.warn-more:hover { border-color: var(--accent-color); color: var(--accent-color) }
 
 @media (max-width: 1000px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr) }

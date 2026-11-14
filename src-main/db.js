@@ -4,10 +4,12 @@
  * UOS环境下如需重新编译原生模块，执行：
  *   npx electron-rebuild -f -w better-sqlite3
  *
- * 版本：v2
+ * 版本：v3
  * - todo 表新增：category_id / remind_at / remind_lead / repeat_rule / parent_id
  *                 deleted_at(软删除) / completed_at / updated_at
- * - 新增表：category / subtask / reminder_log
+ * - v3 新增：quadrant(四象限) / energy_level(精力档位) / planned_at(计划执行日)
+ *            planned_order(同日计划序号) / estimate_minutes(预估耗时)
+ * - 新增表：category / subtask / reminder_log / template / template_item
  * - 所有结构变更通过 migrate() 增量执行，保证旧库数据不丢失
  */
 const Database = require('better-sqlite3');
@@ -42,7 +44,8 @@ const SORT_COLUMNS = {
   create_at: 't.create_at',
   deadline: 't.deadline',
   priority: `(CASE t.priority WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END)`,
-  title: 't.title'
+  title: 't.title',
+  planned_order: '(t.planned_order IS NULL) ASC, t.planned_order'
 };
 
 // ============================================================
@@ -139,7 +142,48 @@ function migrate() {
     changed = true;
   }
 
-  // ---- 2. todo 表加列 ----
+  // ---- 模板与模板条目 ----
+  if (!tableExists('template')) {
+    db.exec(`
+      CREATE TABLE template (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        icon TEXT DEFAULT '📋',
+        color TEXT DEFAULT '#3b82f6',
+        category_id TEXT DEFAULT '',
+        priority TEXT DEFAULT 'medium',
+        remind_lead INTEGER,
+        repeat_rule TEXT,
+        energy_level TEXT DEFAULT 'medium',
+        quadrant TEXT DEFAULT '',
+        deadline_offset_days INTEGER DEFAULT 0,
+        expand_mode TEXT DEFAULT 'single',
+        enabled INTEGER DEFAULT 1,
+        builtin INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        create_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    `);
+    changed = true;
+  }
+
+  if (!tableExists('template_item')) {
+    db.exec(`
+      CREATE TABLE template_item (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        kind TEXT DEFAULT 'subtask',
+        sort_order INTEGER DEFAULT 0,
+        create_at TEXT NOT NULL
+      )
+    `);
+    changed = true;
+  }
+
+  // ---- 3. todo 表加列 ----
   const newColumns = [
     ['category_id', `TEXT DEFAULT ''`],
     ['remind_at', 'TEXT'],
@@ -148,7 +192,13 @@ function migrate() {
     ['parent_id', 'TEXT'],
     ['deleted_at', 'TEXT'],
     ['completed_at', 'TEXT'],
-    ['updated_at', 'TEXT']
+    ['updated_at', 'TEXT'],
+    // v3：智能规划排期字段
+    ['quadrant', `TEXT DEFAULT ''`],
+    ['energy_level', `TEXT DEFAULT 'medium'`],
+    ['planned_at', 'TEXT'],
+    ['planned_order', 'INTEGER'],
+    ['estimate_minutes', 'INTEGER']
   ];
 
   for (const [col, def] of newColumns) {
@@ -158,7 +208,7 @@ function migrate() {
     }
   }
 
-  // ---- 3. 索引 ----
+  // ---- 4. 索引 ----
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_todo_completed ON todo(completed);
     CREATE INDEX IF NOT EXISTS idx_todo_deadline ON todo(deadline);
@@ -167,9 +217,12 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_todo_deleted ON todo(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_todo_parent ON todo(parent_id);
     CREATE INDEX IF NOT EXISTS idx_subtask_todo ON subtask(todo_id);
+    CREATE INDEX IF NOT EXISTS idx_todo_quadrant ON todo(quadrant);
+    CREATE INDEX IF NOT EXISTS idx_todo_planned ON todo(planned_at, planned_order);
+    CREATE INDEX IF NOT EXISTS idx_template_item_tpl ON template_item(template_id);
   `);
 
-  // ---- 4. 内置分类（仅当分类表为空）----
+  // ---- 5. 内置分类（仅当分类表为空）----
   const catCount = db.prepare('SELECT COUNT(*) AS c FROM category').get().c;
   if (catCount === 0) {
     const preset = [
@@ -187,7 +240,7 @@ function migrate() {
   }
 
   if (changed) {
-    console.log('[db] 数据库结构已升级至 v2');
+    console.log('[db] 数据库结构已升级至 v3');
     backupDatabase();
   }
 }
@@ -234,8 +287,10 @@ function getDb() {
 const TODO_SELECT = `
   SELECT t.*,
     (SELECT COUNT(*) FROM subtask s WHERE s.todo_id = t.id) AS subtask_total,
-    (SELECT COUNT(*) FROM subtask s WHERE s.todo_id = t.id AND s.completed = 1) AS subtask_done
+    (SELECT COUNT(*) FROM subtask s WHERE s.todo_id = t.id AND s.completed = 1) AS subtask_done,
+    c.name AS category_name
   FROM todo t
+  LEFT JOIN category c ON c.id = t.category_id
 `;
 
 /**
@@ -246,8 +301,9 @@ function insertTodo(todo) {
     INSERT INTO todo (
       id, title, description, completed, priority, deadline, create_at,
       source_url, source_page_title, source_selected_text,
-      category_id, remind_at, remind_lead, repeat_rule, parent_id, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      category_id, remind_at, remind_lead, repeat_rule, parent_id, updated_at,
+      quadrant, energy_level, planned_at, planned_order, estimate_minutes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   insert.run(
@@ -266,7 +322,13 @@ function insertTodo(todo) {
     todo.remind_lead === undefined || todo.remind_lead === null ? null : todo.remind_lead,
     todo.repeat_rule || null,
     todo.parent_id || null,
-    todo.updated_at || nowISO()
+    todo.updated_at || nowISO(),
+    // v3：智能规划排期字段
+    todo.quadrant || '',
+    todo.energy_level || 'medium',
+    todo.planned_at || null,
+    todo.planned_order === undefined || todo.planned_order === null || todo.planned_order === '' ? null : Number(todo.planned_order),
+    todo.estimate_minutes === undefined || todo.estimate_minutes === null || todo.estimate_minutes === '' ? null : Number(todo.estimate_minutes)
   );
 
   return getTodoById(todo.id);
@@ -286,7 +348,8 @@ function getTodoById(id) {
  *  keyword: 关键词（匹配标题/描述/来源标题/来源文本）
  *  categoryId: '' 全部 | 'none' 未分类 | 具体 id
  *  view: 'all' | 'today' | 'overdue'
- *  sortBy: 'create_at' | 'deadline' | 'priority' | 'title'
+ *  quadrant: '' 全部 | 'unclassified' 未归类 | 'Q1'~'Q4'
+ *  sortBy: 'create_at' | 'deadline' | 'priority' | 'title' | 'planned_order'
  *  order: 'asc' | 'desc'
  *  includeDeleted: boolean（回收站列表用）
  */
@@ -296,6 +359,7 @@ function listTodos(options = {}) {
     keyword = '',
     categoryId = '',
     view = 'all',
+    quadrant = '',
     sortBy = 'create_at',
     order = 'desc',
     page = 1,
@@ -332,6 +396,13 @@ function listTodos(options = {}) {
     params.push(categoryId);
   }
 
+  if (quadrant === 'unclassified') {
+    where.push(`(t.quadrant IS NULL OR t.quadrant = '')`);
+  } else if (quadrant) {
+    where.push('t.quadrant = ?');
+    params.push(quadrant);
+  }
+
   if (view === 'today') {
     // 「今天」= 今天剩余待办（尚未过点），与「已逾期」互斥
     const end = new Date();
@@ -357,7 +428,8 @@ function listTodos(options = {}) {
   const offset = (Number(page) - 1) * Number(pageSize);
   const list = db
     .prepare(
-      `${TODO_SELECT} ${whereSql}
+      `${TODO_SELECT}
+       ${whereSql}
        ORDER BY ${nullsLast}${sortExpr} ${dir}
        LIMIT ? OFFSET ?`
     )
@@ -441,7 +513,13 @@ const UPDATABLE_FIELDS = [
   'repeat_rule',
   'parent_id',
   'deleted_at',
-  'completed_at'
+  'completed_at',
+  // v3：智能规划排期字段
+  'quadrant',
+  'energy_level',
+  'planned_at',
+  'planned_order',
+  'estimate_minutes'
 ];
 
 function updateTodo(id, updates) {
@@ -454,9 +532,9 @@ function updateTodo(id, updates) {
     let value = updates[field];
     if (field === 'completed') value = value ? 1 : 0;
     else if (field === 'repeat_rule') value = value ? (typeof value === 'string' ? value : JSON.stringify(value)) : null;
-    else if (field === 'deadline' || field === 'remind_at' || field === 'deleted_at' || field === 'completed_at') {
+    else if (field === 'deadline' || field === 'remind_at' || field === 'deleted_at' || field === 'completed_at' || field === 'planned_at') {
       value = value || null;
-    } else if (field === 'remind_lead') {
+    } else if (field === 'remind_lead' || field === 'planned_order' || field === 'estimate_minutes') {
       value = value === null || value === undefined || value === '' ? null : Number(value);
     }
 
@@ -863,10 +941,11 @@ function exportAll() {
 
   return {
     app: 'TodoPulse',
-    version: 2,
+    version: 3,
     exported_at: nowISO(),
     categories,
-    todos: todosWithSubs
+    todos: todosWithSubs,
+    templates: listTemplates()
   };
 }
 
@@ -886,6 +965,8 @@ function importAll(payload, mode = 'merge') {
       db.prepare('DELETE FROM reminder_log').run();
       db.prepare('DELETE FROM todo').run();
       db.prepare('DELETE FROM category').run();
+      db.prepare('DELETE FROM template_item').run();
+      db.prepare('DELETE FROM template').run();
     }
 
     // 分类：按名称复用已存在的
@@ -907,13 +988,66 @@ function importAll(payload, mode = 'merge') {
       }
     }
 
+    // 模板：merge 模式按名称去重（旧版 v2 备份没有 templates 字段，按空数组兜底）
+    const insertTpl = db.prepare(`
+      INSERT INTO template (
+        id, name, description, icon, color, category_id, priority, remind_lead, repeat_rule,
+        energy_level, quadrant, deadline_offset_days, expand_mode, enabled, builtin, sort_order,
+        create_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertTplItem = db.prepare(
+      `INSERT INTO template_item (id, template_id, title, kind, sort_order, create_at) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const findTpl = db.prepare('SELECT id FROM template WHERE name = ?');
+    for (const t of payload.templates || []) {
+      if (!t || !t.name) continue;
+      if (mode === 'merge') {
+        // 名称已存在即视为同一条模板，跳过以避免重复堆积
+        if (findTpl.get(t.name)) continue;
+      }
+      let finalId = t.id || uuidv4();
+      if (db.prepare('SELECT id FROM template WHERE id = ?').get(finalId)) finalId = uuidv4();
+      insertTpl.run(
+        finalId,
+        t.name,
+        t.description || '',
+        t.icon || '📋',
+        t.color || '#3b82f6',
+        catIdMap[t.category_id] || t.category_id || '',
+        t.priority || 'medium',
+        t.remind_lead ?? null,
+        t.repeat_rule || null,
+        t.energy_level || 'medium',
+        t.quadrant || '',
+        t.deadline_offset_days ?? 0,
+        t.expand_mode || 'single',
+        t.enabled === undefined ? 1 : t.enabled ? 1 : 0,
+        t.builtin ? 1 : 0,
+        t.sort_order || 0,
+        t.create_at || nowISO(),
+        t.updated_at || nowISO()
+      );
+      for (const it of t.items || []) {
+        insertTplItem.run(
+          it.id || uuidv4(),
+          finalId,
+          it.title || '',
+          it.kind === 'task' ? 'task' : 'subtask',
+          it.sort_order ?? 0,
+          it.create_at || nowISO()
+        );
+      }
+    }
+
     const insertT = db.prepare(`
       INSERT OR REPLACE INTO todo (
         id, title, description, completed, priority, deadline, create_at,
         source_url, source_page_title, source_selected_text,
         category_id, remind_at, remind_lead, repeat_rule, parent_id,
-        deleted_at, completed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        deleted_at, completed_at, updated_at,
+        quadrant, energy_level, planned_at, planned_order, estimate_minutes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     // 使用 OR REPLACE，保证 merge 模式下重复导入同一备份不会主键冲突
     const insertS = db.prepare(
@@ -942,7 +1076,13 @@ function importAll(payload, mode = 'merge') {
         // 已完成但缺 completed_at（旧备份 / 迁移前数据）：回落 create_at，
         // 否则这些记录永远不进「近 7 天完成」趋势统计
         t.completed_at || (t.completed ? (t.create_at || nowISO()) : null),
-        t.updated_at || nowISO()
+        t.updated_at || nowISO(),
+        // v3：智能规划排期字段
+        t.quadrant || '',
+        t.energy_level || 'medium',
+        t.planned_at || null,
+        t.planned_order ?? null,
+        t.estimate_minutes ?? null
       );
 
       for (const s of t.subtasks || []) {
@@ -1030,10 +1170,6 @@ function getDueBoard(options) {
   const weekStart = new Date(now);
   const offset = (now.getDay() + 6) % 7;
   weekStart.setDate(now.getDate() - offset);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
 
   // 三段各自单独查询并各自 LIMIT：
   // 早期实现是先全局取 150 条再内存分段，逾期项排在最前会把今天/本周的条目挤出结果集
@@ -1109,6 +1245,290 @@ module.exports = {
   getDueBoard,
   closeDatabase
 };
+
+// ============================================================
+// 批量操作 & 日历 & 自动分类
+// ============================================================
+
+/**
+ * 批量更新多个待办的分类
+ */
+function batchUpdateCategory(todoIds, categoryId) {
+  if (!todoIds || todoIds.length === 0) return 0;
+  const ph = todoIds.map(() => '?').join(',');
+  const result = db.prepare(`
+    UPDATE todo SET category_id = ?, updated_at = ? WHERE id IN (${ph}) AND deleted_at IS NULL
+  `).run(categoryId || null, nowISO(), ...todoIds);
+  return result.changes;
+}
+
+/**
+ * 批量更新多个待办的优先级
+ */
+function batchUpdatePriority(todoIds, priority) {
+  if (!todoIds || todoIds.length === 0) return 0;
+  const ph = todoIds.map(() => '?').join(',');
+  const result = db.prepare(`
+    UPDATE todo SET priority = ?, updated_at = ? WHERE id IN (${ph}) AND deleted_at IS NULL
+  `).run(priority, nowISO(), ...todoIds);
+  return result.changes;
+}
+
+/**
+ * 按年月查询有截止日期的待办（日历视图用）
+ */
+function listTodosByDeadline(year, month) {
+  const start = new Date(year, month - 1, 1).toISOString();
+  const end = new Date(year, month, 1).toISOString();
+  return db
+    .prepare(`
+      SELECT *, c.name AS category_name
+      FROM todo t
+      LEFT JOIN category c ON c.id = t.category_id
+      WHERE t.deleted_at IS NULL
+        AND t.deadline IS NOT NULL
+        AND t.deadline >= ? AND t.deadline < ?
+      ORDER BY t.deadline ASC
+    `)
+    .all(start, end);
+}
+
+/**
+ * 根据标题匹配自动分类规则
+ */
+function autoCategorize(title, rules) {
+  if (!title || !Array.isArray(rules) || rules.length === 0) return null;
+  const titleLower = title.toLowerCase();
+  for (const rule of rules) {
+    try {
+      const re = new RegExp(rule.regex, 'i');
+      if (re.test(title)) return rule.categoryId || null;
+    } catch {
+      // 无效正则跳过
+    }
+  }
+  return null;
+}
+
+// ============================================================
+// 模板与清单预设
+// ============================================================
+
+const TEMPLATE_FIELDS = [
+  'name',
+  'description',
+  'icon',
+  'color',
+  'category_id',
+  'priority',
+  'remind_lead',
+  'repeat_rule',
+  'energy_level',
+  'quadrant',
+  'deadline_offset_days',
+  'expand_mode',
+  'enabled',
+  'sort_order'
+];
+
+/**
+ * 列出全部模板（含条目）
+ */
+function listTemplates() {
+  const rows = db
+    .prepare('SELECT * FROM template ORDER BY builtin DESC, sort_order ASC, create_at ASC')
+    .all();
+  const items = db
+    .prepare('SELECT * FROM template_item ORDER BY template_id ASC, sort_order ASC')
+    .all();
+  const map = {};
+  for (const it of items) {
+    if (!map[it.template_id]) map[it.template_id] = [];
+    map[it.template_id].push(it);
+  }
+  return rows.map((r) => Object.assign({}, r, { items: map[r.id] || [] }));
+}
+
+/**
+ * 查询单个模板（含条目）
+ */
+function getTemplateById(id) {
+  const row = db.prepare('SELECT * FROM template WHERE id = ?').get(id);
+  if (!row) return null;
+  const items = db.prepare('SELECT * FROM template_item WHERE template_id = ? ORDER BY sort_order ASC').all(id);
+  return Object.assign({}, row, { items });
+}
+
+/**
+ * 覆盖写入模板条目
+ */
+function replaceTemplateItems(templateId, items = []) {
+  db.prepare('DELETE FROM template_item WHERE template_id = ?').run(templateId);
+  const stmt = db.prepare(
+    'INSERT INTO template_item (id, template_id, title, kind, sort_order, create_at) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  items.forEach((it, i) => {
+    stmt.run(
+      it.id || uuidv4(),
+      templateId,
+      it.title || '',
+      it.kind === 'task' ? 'task' : 'subtask',
+      Number.isFinite(Number(it.sort_order)) ? Number(it.sort_order) : i,
+      nowISO()
+    );
+  });
+}
+
+/**
+ * 新增模板
+ */
+function insertTemplate(tpl = {}) {
+  const id = tpl.id || uuidv4();
+  const order = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM template').get().n;
+  db.prepare(`
+    INSERT INTO template (
+      id, name, description, icon, color, category_id, priority, remind_lead, repeat_rule,
+      energy_level, quadrant, deadline_offset_days, expand_mode, enabled, builtin, sort_order,
+      create_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    tpl.name || '未命名模板',
+    tpl.description || '',
+    tpl.icon || '📋',
+    tpl.color || '#3b82f6',
+    tpl.category_id || '',
+    tpl.priority || 'medium',
+    tpl.remind_lead === undefined || tpl.remind_lead === null || tpl.remind_lead === '' ? null : Number(tpl.remind_lead),
+    tpl.repeat_rule || null,
+    tpl.energy_level || 'medium',
+    tpl.quadrant || '',
+    Number.isFinite(Number(tpl.deadline_offset_days)) ? Number(tpl.deadline_offset_days) : 0,
+    tpl.expand_mode === 'preset' ? 'preset' : 'single',
+    tpl.enabled === undefined ? 1 : tpl.enabled ? 1 : 0,
+    tpl.builtin ? 1 : 0,
+    Number.isFinite(Number(tpl.sort_order)) ? Number(tpl.sort_order) : order,
+    nowISO(),
+    nowISO()
+  );
+  replaceTemplateItems(id, tpl.items || []);
+  return getTemplateById(id);
+}
+
+/**
+ * 更新模板（字段白名单）
+ */
+function updateTemplate(id, patch = {}) {
+  const existing = db.prepare('SELECT * FROM template WHERE id = ?').get(id);
+  if (!existing) return null;
+
+  const fields = [];
+  const values = [];
+  for (const field of TEMPLATE_FIELDS) {
+    if (patch[field] === undefined) continue;
+    let value = patch[field];
+    if (field === 'enabled') value = value ? 1 : 0;
+    else if (field === 'remind_lead') {
+      value = value === null || value === undefined || value === '' ? null : Number(value);
+    } else if (field === 'deadline_offset_days') {
+      value = Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0;
+    }
+    fields.push(`${field} = ?`);
+    values.push(value);
+  }
+
+  if (fields.length) {
+    fields.push('updated_at = ?');
+    values.push(nowISO(), id);
+    db.prepare(`UPDATE template SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  }
+  if (Array.isArray(patch.items)) replaceTemplateItems(id, patch.items);
+
+  return getTemplateById(id);
+}
+
+/**
+ * 删除模板（连同条目）
+ */
+function deleteTemplate(id) {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM template_item WHERE template_id = ?').run(id);
+    db.prepare('DELETE FROM template WHERE id = ?').run(id);
+  });
+  tx();
+  return true;
+}
+
+/**
+ * 批量插入待办及其子任务（单事务，避免 WAL 反复提交）
+ */
+function insertTodosBatch(todos = []) {
+  if (!Array.isArray(todos) || !todos.length) return [];
+  const ids = [];
+  const tx = db.transaction(() => {
+    for (const t of todos) {
+      const id = t.id || uuidv4();
+      insertTodo(Object.assign({}, t, { id, create_at: t.create_at || nowISO() }));
+      ids.push(id);
+      for (const s of t.subtasks || []) {
+        insertSubtask({
+          todo_id: id,
+          title: s.title || '',
+          completed: s.completed ? 1 : 0,
+          sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0
+        });
+      }
+    }
+  });
+  tx();
+  return ids.map((id) => getTodoById(id)).filter(Boolean);
+}
+
+/**
+ * 批量更新象限归属
+ */
+function batchUpdateQuadrant(todoIds, quadrant) {
+  if (!todoIds || !todoIds.length) return 0;
+  const ph = todoIds.map(() => '?').join(',');
+  const result = db.prepare(`
+    UPDATE todo SET quadrant = ?, updated_at = ? WHERE id IN (${ph}) AND deleted_at IS NULL
+  `).run(quadrant || '', nowISO(), ...todoIds);
+  return result.changes;
+}
+
+/**
+ * 批量顺延截止时间（单事务；markOnly 的条目只标记不改时间）
+ */
+function batchDeferDeadlines(targets = []) {
+  if (!Array.isArray(targets) || !targets.length) return 0;
+  let changed = 0;
+  const tx = db.transaction(() => {
+    const stmt = db.prepare('UPDATE todo SET deadline = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL');
+    for (const t of targets) {
+      if (!t || !t.id || t.markOnly || !t.deadline) continue;
+      stmt.run(t.deadline, nowISO(), t.id);
+      changed++;
+    }
+  });
+  tx();
+  return changed;
+}
+
+// 重新挂载到 exports
+const _export = module.exports;
+_export.batchUpdateCategory = batchUpdateCategory;
+_export.batchUpdatePriority = batchUpdatePriority;
+_export.listTodosByDeadline = listTodosByDeadline;
+_export.autoCategorize = autoCategorize;
+// 模板与智能规划
+_export.listTemplates = listTemplates;
+_export.getTemplateById = getTemplateById;
+_export.insertTemplate = insertTemplate;
+_export.updateTemplate = updateTemplate;
+_export.deleteTemplate = deleteTemplate;
+_export.insertTodosBatch = insertTodosBatch;
+_export.batchUpdateQuadrant = batchUpdateQuadrant;
+_export.batchDeferDeadlines = batchDeferDeadlines;
 
 /**
  * 清空全部待办数据（危险操作）

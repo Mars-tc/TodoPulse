@@ -23,6 +23,14 @@ export const SCRIPT_ATTRS = [
   { value: 'attr', label: '自定义属性' }
 ]
 
+// 高级匹配维度元数据（供编辑器渲染分组与提示）
+export const SCRIPT_MATCH_FIELDS = [
+  { key: 'title', label: '页面标题', placeholder: '如 工单、Issue（子串或 /正则/）' },
+  { key: 'path', label: 'URL 路径', placeholder: '如 /issues/*、/pull/*' },
+  { key: 'domain', label: '域名关键词', placeholder: '如 github.com、jira.xxx.com' },
+  { key: 'selection', label: '选中文字', placeholder: '如 PROJ-\\d+、https?://（子串或 /正则/）' }
+]
+
 export const scripts = ref([])
 
 /** 空白脚本模板 */
@@ -34,6 +42,7 @@ export function createScript(patch = {}) {
     mode: 'selector',
     action: 'fill',
     patterns: [],
+    match: {},
     fields: {},
     code: '',
     builtin: false,

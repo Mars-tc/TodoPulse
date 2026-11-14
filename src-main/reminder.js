@@ -9,10 +9,13 @@
  *   - dnd          免打扰时段 { enabled, start: 'HH:MM', end: 'HH:MM' }
  *   - sound        提醒声音
  */
-const { listDueReminders, markReminderFired, listTodos } = require('./db');
+const { listDueReminders, markReminderFired, listTodos, batchDeferDeadlines } = require('./db');
 const { formatDeadline } = require('./time_parser');
+const { isOverdue, resolveDeferTargets } = require('./quadrant_planner');
+const { getSettings } = require('./config_store');
 
 let timer = null;
+let initialTimer = null;
 let notifyFn = null;
 let broadcastFn = null;
 
@@ -28,7 +31,9 @@ function toMinutes(hhmm) {
   if (typeof hhmm !== 'string') return null;
   const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
   if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  return hour < 24 && minute < 60 ? hour * 60 + minute : null;
 }
 
 /**
@@ -97,9 +102,10 @@ function scan() {
     if (!isNew) continue;
 
     const when = formatDeadline(c.todo.deadline) || '未设置';
+    const cat = c.todo.category_name ? ` [${c.todo.category_name}]` : '';
     notifyFn(
-      c.kind === 'overdue' ? '⏰ 待办已逾期' : '🔔 待办即将到期',
-      `${c.todo.title}\n截止时间：${when}`,
+      c.kind === 'overdue' ? `⏰ 逾期提醒${cat}` : `🔔 到期提醒${cat}`,
+      `${c.todo.title}\n截止时间：${when}${c.todo.priority ? ` · 优先级：${{high:'高',medium:'中',low:'低'}[c.todo.priority] || '中'}` : ''}`,
       options.sound
     );
     fired++;
@@ -107,6 +113,42 @@ function scan() {
 
   if (fired > 0 && broadcastFn) {
     broadcastFn();
+  }
+
+  // 逾期自动顺延（默认关闭）：挂在既有扫描周期内，不另起定时器
+  try {
+    runAutoDefer();
+  } catch (e) {
+    console.warn('[reminder] 逾期自动顺延失败:', e.message);
+  }
+}
+
+/**
+ * 逾期自动顺延
+ * - 仅当 settings.planning.auto_defer_enabled 为真时执行，关闭时行为与原先完全一致
+ * - 顺延后 deadline 已不在过去，不会再被判定为逾期，因此不会反复触发
+ * - 仅标记（mark_only）不改写时间，无需在此处理
+ */
+function runAutoDefer() {
+  let planning = null;
+  try {
+    const settings = getSettings() || {};
+    planning = settings.planning || {};
+  } catch (e) {
+    return;
+  }
+  if (!planning || !planning.auto_defer_enabled) return;
+  if (planning.auto_defer_strategy === 'mark_only') return;
+
+  const now = new Date();
+  const overdue = listTodos({ view: 'overdue', pageSize: 200 }).list.filter((t) => isOverdue(t, now));
+  if (!overdue.length) return;
+
+  const targets = resolveDeferTargets(overdue, planning.auto_defer_strategy || 'today', now);
+  const changed = batchDeferDeadlines(targets);
+  if (changed > 0) {
+    console.log('[reminder] 已自动顺延逾期待办:', changed);
+    if (broadcastFn) broadcastFn();
   }
 }
 
@@ -137,18 +179,24 @@ function startReminder(notify, broadcast, opts) {
   if (typeof timer.unref === 'function') timer.unref();
 
   // 启动后延迟 5 秒立即扫一次
-  setTimeout(() => {
+  initialTimer = setTimeout(() => {
+    initialTimer = null;
     try {
       scan();
     } catch (e) {
       console.error('[reminder] 首次扫描异常:', e.message);
     }
   }, 5000);
+  if (typeof initialTimer.unref === 'function') initialTimer.unref();
 
   console.log('[reminder] 提醒定时器已启动，间隔', options.scanInterval, '秒');
 }
 
 function stopReminder() {
+  if (initialTimer) {
+    clearTimeout(initialTimer);
+    initialTimer = null;
+  }
   if (timer) {
     clearInterval(timer);
     timer = null;
@@ -158,6 +206,10 @@ function stopReminder() {
 function mergeOptions(base, override) {
   const out = { ...base, ...override };
   if (override && override.dnd) out.dnd = { ...(base.dnd || {}), ...override.dnd };
+  const interval = ['number', 'string'].includes(typeof out.scanInterval)
+    ? Number(out.scanInterval) : NaN;
+  out.scanInterval = Number.isFinite(interval) && interval >= 1 && interval <= 2147483
+    ? interval : 60;
   return out;
 }
 

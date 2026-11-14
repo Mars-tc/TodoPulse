@@ -57,6 +57,12 @@
       </div>
     </div>
 
+    <!-- 连续打卡追踪 -->
+    <div v-if="streak > 0" class="w-streak">
+      <span class="w-streak-fire">🔥</span>
+      <span class="w-streak-text">连续打卡 {{ streak }} 天</span>
+    </div>
+
     <!-- 底部状态栏 -->
     <footer class="w-foot">
       <span>更新于 {{ updatedAtText }}</span>
@@ -78,6 +84,7 @@ const completingIds = reactive({})
 const collapsed = reactive({})
 const opacityValue = ref(1)
 const accent = ref('#3b82f6')
+const streak = ref(0)
 
 let disposers = []
 
@@ -110,11 +117,42 @@ async function refresh() {
   refreshing.value = true
   try {
     data.value = await window.electronAPI.getWidgetData()
+    streak.value = await calcStreak()
   } catch (e) {
     console.error('[widget] 刷新失败:', e)
   } finally {
     setTimeout(() => { refreshing.value = false }, 600)
   }
+}
+
+// 计算连续打卡天数：从今天往前数，连续完成过至少1条的日期天数
+async function calcStreak() {
+  try {
+    const todos = await window.electronAPI.getTodos({ filter: { completed: true } })
+    if (!todos.length) return 0
+    // 按 completed_at 去重每天
+    const daySet = new Set()
+    for (const t of todos) {
+      if (t.completed_at) {
+        const d = new Date(t.completed_at)
+        daySet.add(`${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`)
+      }
+    }
+    const days = Array.from(daySet).sort().reverse()
+    let s = 0
+    const today = new Date()
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today)
+      d.setDate(d.getDate() - i)
+      const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+      if (daySet.has(key)) {
+        s++
+      } else if (i > 0) {
+        break // 中断：今天或昨天之后断了就不再连续
+      }
+    }
+    return s
+  } catch { return 0 }
 }
 
 async function complete(t) {
@@ -389,6 +427,19 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
+
+/* ---- 连续打卡 ---- */
+.w-streak {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  background: linear-gradient(90deg, rgba(249,115,22,0.12), rgba(234,179,8,0.10));
+  border-bottom: 1px solid var(--border-color);
+  font-size: calc(11.5px * var(--font-scale));
+  color: var(--text-secondary);
+}
+.w-streak-fire { font-size: 14px }
+.w-streak-text { font-weight: 600; color: #ea580c }
 
 /* ---- 底部 ---- */
 .w-foot {

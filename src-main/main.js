@@ -51,6 +51,8 @@ const {
 } = require('./time_parser');
 const { startReminder, stopReminder, restartReminder } = require('./reminder');
 const repeatRule = require('./repeat_rule');
+const templateEngine = require('./template_engine');
+const quadrantPlanner = require('./quadrant_planner');
 const widget = require('./widget_window');
 
 // ============================================================
@@ -86,8 +88,8 @@ function sendSystemNotification(title, body, sound) {
 
   // 降级：尝试通过child_process调用notify-send（Linux/UOS常见）
   try {
-    const { exec } = require('child_process');
-    exec(`notify-send "${title}" "${body}"`, (err) => {
+    const { execFile } = require('child_process');
+    execFile('notify-send', ['--', String(title), String(body)], (err) => {
       if (err) console.warn('[main] notify-send also failed:', err.message);
     });
   } catch (e) {
@@ -135,6 +137,13 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let trayHintShown = false;
+let serverChangeQueue = Promise.resolve();
+
+function changeServer(operation) {
+  const result = serverChangeQueue.then(operation);
+  serverChangeQueue = result.catch(() => {});
+  return result;
+}
 
 function getIconPath() {
   return path.join(__dirname, '../src-renderer/assets/icon.png');
@@ -227,6 +236,20 @@ function buildTrayMenu() {
       click: () => {
         showWindow();
         mainWindow && mainWindow.webContents.send('menu-open-scripts');
+      }
+    },
+    {
+      label: '模板库',
+      click: () => {
+        showWindow();
+        mainWindow && mainWindow.webContents.send('menu-open-templates');
+      }
+    },
+    {
+      label: '智能规划',
+      click: () => {
+        showWindow();
+        mainWindow && mainWindow.webContents.send('menu-open-planning');
       }
     },
     {
@@ -383,12 +406,15 @@ app.whenReady().then(async () => {
   // ============================================================
 
   // 服务信息
-  ipcMain.handle('get-server-info', () => ({
-    port: getPort(),
-    token: getToken(),
-    isRunning: !!getPort(),
-    configPath: getConfigPath()
-  }));
+  ipcMain.handle('get-server-info', async () => {
+    const config = await getConfig();
+    return {
+      port: getPort() || config.port,
+      token: getToken() || config.token,
+      isRunning: !!getPort(),
+      configPath: getConfigPath()
+    };
+  });
 
   // ============================================================
   // 设置相关 IPC
@@ -398,7 +424,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('get-settings', () => getSettings());
 
   // 保存设置（深合并后落盘），并按变更项热更新主进程能力
-  ipcMain.handle('save-settings', (event, patch) => {
+  ipcMain.handle('save-settings', (event, patch = {}) => {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw new TypeError('设置必须为对象');
+    }
     const prev = getSettings();
     const next = saveSettings(patch || {});
 
@@ -456,8 +485,12 @@ app.whenReady().then(async () => {
     const fields = p.fields || {};
     const hasField = Object.keys(fields).some((k) => fields[k] && fields[k].selector);
     if (!hasField) return { success: false, error: '至少配置一个字段的选择器' };
-    if (!Array.isArray(p.patterns) || !p.patterns.filter((x) => String(x).trim()).length) {
-      return { success: false, error: '至少填写一条匹配规则' };
+    // 任一维度非空（URL 通配 patterns 或高级匹配 match）即视为有效
+    const hasPattern = Array.isArray(p.patterns) && p.patterns.some((x) => String(x).trim());
+    const match = p.match && typeof p.match === 'object' ? p.match : {};
+    const hasMatch = Object.keys(match).some((k) => Array.isArray(match[k]) && match[k].some((x) => String(x).trim()));
+    if (!hasPattern && !hasMatch) {
+      return { success: false, error: '至少填写一条 URL 规则或高级匹配条件' };
     }
     return { success: true };
   });
@@ -532,6 +565,30 @@ app.whenReady().then(async () => {
     return { success: true };
   });
 
+  // ============================================================
+  // 批量操作 & 日历 & 自动分类 IPC
+  // ============================================================
+
+  ipcMain.handle('batch-update-category', (_event, ids, categoryId) => {
+    try { return db.batchUpdateCategory(ids, categoryId); }
+    catch (e) { console.error('[main] batch-update-category 失败:', e.message); throw e; }
+  });
+
+  ipcMain.handle('batch-update-priority', (_event, ids, priority) => {
+    try { return db.batchUpdatePriority(ids, priority); }
+    catch (e) { console.error('[main] batch-update-priority 失败:', e.message); throw e; }
+  });
+
+  ipcMain.handle('list-todos-by-deadline', (_event, year, month) => {
+    try { return db.listTodosByDeadline(year, month); }
+    catch (e) { console.error('[main] list-todos-by-deadline 失败:', e.message); throw e; }
+  });
+
+  ipcMain.handle('auto-categorize', (_event, title, rules) => {
+    try { return db.autoCategorize(title, rules || []); }
+    catch (e) { console.error('[main] auto-categorize 失败:', e.message); throw e; }
+  });
+
   // 应用信息（关于页）
   ipcMain.handle('get-app-info', () => ({
     version: app.getVersion(),
@@ -561,86 +618,82 @@ app.whenReady().then(async () => {
   ipcMain.handle('set-autostart', (event, enabled) => autostart.setAutoLaunch(!!enabled));
 
   // 重启本地服务（端口修改，失败回滚）
-  ipcMain.handle('restart-server', async (event, port) => {
+  ipcMain.handle('restart-server', (event, port) => changeServer(async () => {
     const newPort = Number(port);
-    if (!Number.isInteger(newPort) || newPort <= 0 || newPort >= 65535) {
+    if (!Number.isInteger(newPort) || newPort <= 0 || newPort > 65535) {
       return { success: false, error: '端口号无效' };
     }
     const oldPort = getPort();
     const oldToken = getToken();
     const wasRunning = !!oldPort;
-
-    // 仅在端口真正变化时才探测冲突：同端口相当于原地重启，自己占着自己
-    if (newPort !== oldPort) {
-      const available = await isPortAvailable(newPort);
-      if (!available) return { success: false, error: '端口已被占用' };
-    }
-
-    await stopServer();
-
-    // 服务原本处于停止状态：只更新配置，不擅自把它拉起来
-    if (!wasRunning) {
-      const cfg = await getConfig();
-      cfg.port = newPort;
-      saveConfig(cfg);
-      refreshTrayMenu();
-      return { success: true, port: newPort, running: false };
+    if (newPort !== oldPort && !(await isPortAvailable(newPort))) {
+      return { success: false, error: '端口已被占用' };
     }
 
     try {
-      await startServer(newPort, oldToken);
-      const cfg = await getConfig();
-      cfg.port = newPort;
-      saveConfig(cfg);
-      refreshTrayMenu();
-      return { success: true, port: newPort, running: true };
-    } catch (e) {
-      // 回滚到旧端口，避免服务停在不可用中间态
-      try {
-        await startServer(oldPort, oldToken);
-      } catch {
-        /* ignore */
+      if (wasRunning) {
+        await stopServer();
+        await startServer(newPort, oldToken);
       }
+      saveConfig({ ...(await getConfig()), port: newPort });
+      refreshTrayMenu();
+      return { success: true, port: newPort, running: wasRunning };
+    } catch (e) {
+      if (wasRunning) {
+        try {
+          await stopServer();
+          await startServer(oldPort, oldToken);
+        } catch (rollbackError) {
+          console.error('[main] 恢复本地服务失败:', rollbackError.message);
+        }
+      }
+      refreshTrayMenu();
       return { success: false, error: e.message };
     }
-  });
+  }));
 
   // 重新生成 Token（落盘并重启服务）
-  ipcMain.handle('regenerate-token', async () => {
+  ipcMain.handle('regenerate-token', () => changeServer(async () => {
     const newToken = generateToken();
     const oldPort = getPort();
     const oldToken = getToken();
-    await stopServer();
     try {
-      await startServer(oldPort, newToken);
-      const cfg = await getConfig();
-      cfg.token = newToken;
-      saveConfig(cfg);
+      if (oldPort) {
+        await stopServer();
+        await startServer(oldPort, newToken);
+      }
+      saveConfig({ ...(await getConfig()), token: newToken });
+      refreshTrayMenu();
       return { success: true, token: newToken };
     } catch (e) {
-      try {
-        await startServer(oldPort, oldToken);
-      } catch {
-        /* ignore */
+      if (oldPort) {
+        try {
+          await stopServer();
+          await startServer(oldPort, oldToken);
+        } catch (rollbackError) {
+          console.error('[main] 恢复本地服务失败:', rollbackError.message);
+        }
       }
+      refreshTrayMenu();
       return { success: false, error: e.message };
     }
-  });
+  }));
 
   // 本地服务启停开关
-  ipcMain.handle('set-server-running', async (event, running) => {
-    if (running) {
-      try {
-        await startServer(getPort(), getToken());
-        return { success: true, running: true };
-      } catch (e) {
-        return { success: false, error: e.message };
+  ipcMain.handle('set-server-running', (event, running) => changeServer(async () => {
+    try {
+      if (running) {
+        const cfg = await getConfig();
+        await startServer(cfg.port, cfg.token);
+      } else {
+        await stopServer();
       }
+      refreshTrayMenu();
+      return { success: true, running: !!getPort() };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
-    await stopServer();
-    refreshTrayMenu();
-    return { success: true, running: false };
-  });
+  }));
 
   // 重复规则预览：与主进程生成下一轮走同一实现，避免预览与实际不一致
   ipcMain.handle('compute-repeat-next', (event, fromISO, rule) => {
@@ -703,6 +756,22 @@ app.whenReady().then(async () => {
     if (Array.isArray(todo.subtasks)) {
       db.replaceSubtasks(inserted.id, todo.subtasks);
     }
+
+    // 自动分类：匹配用户配置的规则
+    try {
+      const settings = getSettings();
+      const rules = settings?.auto_categorize_rules || [];
+      if (rules.length > 0) {
+        const matchCatId = db.autoCategorize(todo.title, rules);
+        if (matchCatId && matchCatId !== (todo.category_id || '')) {
+          db.updateTodo(inserted.id, { category_id: matchCatId });
+          console.log('[main] 自动分类匹配:', todo.title, '→', matchCatId);
+        }
+      }
+    } catch (e) {
+      console.warn('[main] 自动分类失败:', e.message);
+    }
+
     return db.getTodoById(inserted.id);
   });
 
@@ -772,6 +841,219 @@ app.whenReady().then(async () => {
 
   // ---- 重复规则 ----
   ipcMain.handle('complete-recurring', (event, id) => db.completeRecurringTodo(id));
+
+  // ---- 模板 ----
+  /**
+   * 模板展开上下文：分类名映射、目标日期、id 生成器
+   * id 统一由主进程注入，与待办 id 来源保持一致
+   */
+  function buildTemplateContext(tpl, options = {}) {
+    const categories = db.listCategories();
+    const categoryIdMap = {};
+    const categoryNames = {};
+    for (const c of categories) {
+      categoryIdMap[c.id] = c.id;
+      categoryIdMap[c.name] = c.id;
+      categoryNames[c.id] = c.name;
+    }
+    return {
+      now: new Date(),
+      targetDate: options.targetDate || undefined,
+      deadlineTime: options.deadlineTime || '18:00',
+      categoryIdMap,
+      categoryName: categoryNames[tpl && tpl.category_id] || '',
+      idFactory: () => uuidv4()
+    };
+  }
+
+  ipcMain.handle('list-templates', () => db.listTemplates());
+  ipcMain.handle('get-template', (event, id) => db.getTemplateById(id));
+
+  ipcMain.handle('save-template', (event, payload) => {
+    try {
+      const data = payload || {};
+      if (data.id && db.getTemplateById(data.id)) {
+        const existing = db.getTemplateById(data.id);
+        // 内置模板只读：需先复制为自定义模板再编辑
+        if (existing && existing.builtin) {
+          return { error: '内置模板为只读，请复制为自定义模板后再编辑' };
+        }
+        return db.updateTemplate(data.id, data);
+      }
+      return db.insertTemplate(data);
+    } catch (e) {
+      console.error('[main] 保存模板失败:', e.message);
+      return null;
+    }
+  });
+
+  ipcMain.handle('delete-template', (event, id) => {
+    try {
+      const tpl = db.getTemplateById(id);
+      // 内置模板受保护：只读、不可删除，仅可复制为自定义模板
+      if (tpl && tpl.builtin) {
+        return { success: false, error: '内置模板不可删除，可复制为自定义模板' };
+      }
+      db.deleteTemplate(id);
+      return { success: true };
+    } catch (e) {
+      console.error('[main] 删除模板失败:', e.message);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('duplicate-template', (event, id) => {
+    try {
+      const src = db.getTemplateById(id);
+      if (!src) return null;
+      return db.insertTemplate({
+        ...src,
+        id: undefined,
+        name: `${src.name || '未命名模板'} 副本`,
+        builtin: 0,
+        items: (src.items || []).map((it) => ({
+          title: it.title,
+          kind: it.kind,
+          sort_order: it.sort_order
+        }))
+      });
+    } catch (e) {
+      console.error('[main] 复制模板失败:', e.message);
+      return null;
+    }
+  });
+
+  ipcMain.handle('preview-template', (event, id) => {
+    const tpl = db.getTemplateById(id);
+    if (!tpl) return { todos: [], warnings: ['模板不存在'] };
+    return templateEngine.expandTemplate(tpl, buildTemplateContext(tpl));
+  });
+
+  ipcMain.handle('apply-template', (event, id, options = {}) => {
+    try {
+      const tpl = db.getTemplateById(id);
+      if (!tpl) return { success: false, error: '模板不存在', created: [], warnings: [] };
+      if (!tpl.enabled) return { success: false, error: '模板已停用', created: [], warnings: [] };
+
+      const result = templateEngine.expandTemplate(tpl, buildTemplateContext(tpl, options));
+      if (!result.todos.length) {
+        return {
+          success: false,
+          error: result.warnings[0] || '模板没有可生成的内容',
+          created: [],
+          warnings: result.warnings
+        };
+      }
+      const created = db.insertTodosBatch(result.todos);
+      broadcastChange();
+      console.log('[main] 已从模板生成待办:', created.length);
+      return { success: true, created, warnings: result.warnings };
+    } catch (e) {
+      console.error('[main] 应用模板失败:', e.message);
+      return { success: false, error: e.message, created: [], warnings: [] };
+    }
+  });
+
+  // ---- 智能规划 ----
+  function getPlanningSettings() {
+    const settings = getSettings() || {};
+    const planning = settings.planning || {};
+    const defaultSlots = [
+      { label: '上午高能', start: '08:00', end: '12:00', energy: 'high' },
+      { label: '午后中等', start: '13:00', end: '18:00', energy: 'medium' },
+      { label: '晚间低能', start: '19:00', end: '22:00', energy: 'low' }
+    ];
+    return {
+      daily_capacity_minutes:
+        Number(planning.daily_capacity_minutes) > 0 ? Number(planning.daily_capacity_minutes) : 240,
+      default_estimate_minutes:
+        Number(planning.default_estimate_minutes) > 0 ? Number(planning.default_estimate_minutes) : 30,
+      urgent_within_days: Number(planning.urgent_within_days) > 0 ? Number(planning.urgent_within_days) : 3,
+      auto_defer_enabled: !!planning.auto_defer_enabled,
+      auto_defer_strategy: planning.auto_defer_strategy || 'today',
+      quadrant_suggest_enabled: planning.quadrant_suggest_enabled !== false,
+      energy_slots:
+        Array.isArray(planning.energy_slots) && planning.energy_slots.length
+          ? planning.energy_slots
+          : defaultSlots
+    };
+  }
+
+  ipcMain.handle('plan-preview', (event) => {
+    try {
+      const now = new Date();
+      const planning = getPlanningSettings();
+      const all = db.listTodos({ status: 'pending', pageSize: 1000 }).list;
+      // 未归类待办附带象限建议（仅建议，不落库；用户采纳后才写入 quadrant）
+      for (const t of all) {
+        if (t.quadrant) continue;
+        const s = quadrantPlanner.suggestQuadrant(t, now, { urgentWithinDays: planning.urgent_within_days });
+        t.suggested_quadrant = s.quadrant;
+        t.suggested_reason = s.reason;
+      }
+      const quadrants = quadrantPlanner.buildQuadrants(all);
+      const plan = quadrantPlanner.planToday(all, planning, now);
+      const overdue = all
+        .filter((t) => quadrantPlanner.isOverdue(t, now))
+        .map((t) => {
+          const dl = new Date(t.deadline);
+          const days = Math.max(1, Math.ceil((now.getTime() - dl.getTime()) / 86400000));
+          return { id: t.id, title: t.title, deadline: t.deadline, overdueDays: days };
+        });
+      return { quadrants, plan, overdue, settings: planning };
+    } catch (e) {
+      console.error('[main] 生成规划预览失败:', e.message);
+      return {
+        quadrants: { Q1: [], Q2: [], Q3: [], Q4: [], unclassified: [] },
+        plan: { items: [], overflow: [], usedMinutes: 0, capacityMinutes: 0 },
+        overdue: [],
+        settings: getPlanningSettings(),
+        error: e.message
+      };
+    }
+  });
+
+  ipcMain.handle('defer-overdue', (event, options = {}) => {
+    try {
+      const planning = getPlanningSettings();
+      const strategy = options.strategy || planning.auto_defer_strategy || 'today';
+      const now = new Date();
+      const all = db.listTodos({ status: 'pending', pageSize: 1000 }).list;
+      const overdue = all.filter((t) => quadrantPlanner.isOverdue(t, now));
+      const targets = quadrantPlanner.resolveDeferTargets(overdue, strategy, now);
+      const changed = db.batchDeferDeadlines(targets);
+      if (changed > 0) broadcastChange();
+      return { success: true, changed, total: overdue.length, strategy, targets };
+    } catch (e) {
+      console.error('[main] 顺延逾期待办失败:', e.message);
+      return { success: false, error: e.message, changed: 0, total: 0 };
+    }
+  });
+
+  ipcMain.handle('apply-suggested-quadrant', (event, ids) => {
+    try {
+      if (!Array.isArray(ids) || !ids.length) return { success: true, changed: 0 };
+      const now = new Date();
+      const planning = getPlanningSettings();
+      const wanted = ids.map(String);
+      const all = db.listTodos({ status: 'pending', pageSize: 1000 }).list;
+      let changed = 0;
+      for (const t of all) {
+        if (!wanted.includes(t.id)) continue;
+        if (t.quadrant) continue; // 已归类的条目不覆盖用户意图
+        const suggestion = quadrantPlanner.suggestQuadrant(t, now, {
+          urgentWithinDays: planning.urgent_within_days
+        });
+        db.updateTodo(t.id, { quadrant: suggestion.quadrant });
+        changed++;
+      }
+      if (changed > 0) broadcastChange();
+      return { success: true, changed };
+    } catch (e) {
+      console.error('[main] 采纳象限建议失败:', e.message);
+      return { success: false, error: e.message, changed: 0 };
+    }
+  });
 
   // ---- 统计 ----
   ipcMain.handle('get-stats', () => db.getStats());
@@ -871,7 +1153,7 @@ async function cleanupResources() {
   try {
     // 有 keep-alive 连接时 server.close() 可能迟迟不回调，加超时兜底
     await Promise.race([
-      stopServer(),
+      changeServer(() => stopServer()),
       new Promise((resolve) => setTimeout(resolve, 1500))
     ]);
   } catch (e) {

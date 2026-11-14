@@ -20,6 +20,8 @@
 
       <div class="header-actions">
         <button class="icon-btn" title="数据统计" @click="currentView = 'stats'">📊</button>
+        <button class="icon-btn" title="智能规划" @click="currentView = 'planning'">🧭</button>
+        <button class="icon-btn" title="模板库" @click="currentView = 'templates'">🧰</button>
         <button class="icon-btn" title="回收站" @click="currentView = 'trash'">🗑️</button>
         <button class="icon-btn" title="网页脚本" @click="currentView = 'scripts'">🧩</button>
         <button class="icon-btn" title="设置" @click="currentView = 'settings'">⚙️</button>
@@ -27,6 +29,7 @@
           {{ actualDark ? '☀️' : '🌙' }}
         </button>
         <button class="icon-btn" title="浏览器扩展指南" @click="openExtensionGuide">🔌</button>
+        <button class="icon-btn" title="全局搜索 (Ctrl+K)" @click="triggerSearch">🔍</button>
       </div>
     </header>
 
@@ -41,12 +44,14 @@
         @show-stats="currentView = 'stats'"
         @manage-trash="currentView = 'trash'"
         @manage-scripts="currentView = 'scripts'"
+        @manage-templates="currentView = 'templates'"
+        @manage-planning="currentView = 'planning'"
       />
 
       <!-- ============ 主内容 ============ -->
       <main class="app-main">
         <!-- 统计视图 -->
-        <StatsPanel v-if="currentView === 'stats'" @back="currentView = 'list'" />
+        <StatsPanel v-if="currentView === 'stats'" @back="currentView = 'list'" @goto="handleStatsGoto" />
 
         <!-- 网页脚本视图 -->
         <ScriptManager
@@ -68,57 +73,95 @@
           @changed="loadTodos"
         />
 
+        <!-- 智能规划视图 -->
+        <PlanningView
+          v-else-if="currentView === 'planning'"
+          @back="currentView = 'list'"
+        />
+
+        <!-- 模板库视图 -->
+        <TemplateManager
+          v-else-if="currentView === 'templates'"
+          @back="currentView = 'list'"
+        />
+
         <!-- 待办列表视图 -->
         <template v-else>
-          <div class="filter-bar">
-            <div class="tabs">
-              <span class="tab-slider" :style="tabSliderStyle"></span>
-              <button
-                v-for="t in tabs"
-                :key="t.key"
-                :class="['tab-btn', { active: filter === t.key }]"
-                @click="setFilter(t.key)"
-              >{{ t.label }}（{{ t.count }}）</button>
-            </div>
-
-            <div class="filter-actions">
-              <button v-if="selectedIds.length" class="btn danger" @click="batchDelete">
-                删除已选（{{ selectedIds.length }}）
-              </button>
-              <button v-if="stats.completed > 0" class="btn ghost" @click="clearCompleted">
-                🧹 清除已完成
-              </button>
-              <button class="btn ghost" title="导入 JSON 备份" @click="handleImport">📥 导入</button>
-              <button class="btn ghost" title="导出备份 / CSV" @click="handleExport">📤 导出</button>
+          <!-- 视图切换器 -->
+          <div class="view-switcher">
+            <div class="view-tabs">
+              <span class="vt-slider" :style="vtSliderStyle"></span>
+              <button :class="['vt-btn', { active: currentListView === 'list' }]" @click="currentListView = 'list'">📋 列表</button>
+              <button :class="['vt-btn', { active: currentListView === 'kanban' }]" @click="currentListView = 'kanban'">📊 看板</button>
+              <button :class="['vt-btn', { active: currentListView === 'calendar' }]" @click="currentListView = 'calendar'">📅 日历</button>
             </div>
           </div>
 
-          <div class="list-container">
-            <div v-if="loading" class="loading-state">
-              <span class="spinner"></span> 加载中…
-            </div>
-
-            <TodoList
-              v-else
+          <div v-if="currentListView === 'kanban'">
+            <KanbanView
               :todos="todos"
-              :selected-ids="selectedIds"
-              :keyword="keyword"
-              @toggle="toggleTodo"
-              @delete="removeOne"
-              @edit="openEditModal"
-              @select="toggleSelect"
-              @remind="openRemindModal"
+              :categories="categories"
             />
-
-            <div v-if="!loading && todos.length === 0" class="empty-state">
-              <div class="empty-icon">{{ keyword ? '🔍' : '📭' }}</div>
-              <p class="empty-text">{{ keyword ? '没有匹配的待办' : '暂无待办事项' }}</p>
-              <p class="empty-hint">
-                {{ keyword ? '试试更换关键词或清空搜索' : '使用浏览器扩展收藏网页，或点击下方按钮新建' }}
-              </p>
-              <button v-if="keyword" class="btn ghost" @click="onKeyword('')">清空搜索</button>
-            </div>
           </div>
+
+          <div v-else-if="currentListView === 'calendar'">
+            <CalendarView
+              :todos="todos"
+              @day-click="onCalendarDayClick"
+            />
+          </div>
+
+          <template v-else>
+            <div class="filter-bar">
+              <div class="tabs">
+                <span class="tab-slider" :style="tabSliderStyle"></span>
+                <button
+                  v-for="t in tabs"
+                  :key="t.key"
+                  :class="['tab-btn', { active: filter === t.key }]"
+                  @click="setFilter(t.key)"
+                >{{ t.label }}（{{ t.count }}）</button>
+              </div>
+
+              <div class="filter-actions">
+                <button v-if="selectedIds.length" class="btn danger" @click="batchDelete">
+                  删除已选（{{ selectedIds.length }}）
+                </button>
+                <button v-if="stats.completed > 0" class="btn ghost" @click="clearCompleted">
+                  🧹 清除已完成
+                </button>
+                <button class="btn ghost" title="导入 JSON 备份" @click="handleImport">📥 导入</button>
+                <button class="btn ghost" title="导出备份 / CSV" @click="handleExport">📤 导出</button>
+              </div>
+            </div>
+
+            <div class="list-container">
+              <div v-if="loading" class="loading-state">
+                <span class="spinner"></span> 加载中…
+              </div>
+
+              <TodoList
+                v-else
+                :todos="todos"
+                :selected-ids="selectedIds"
+                :keyword="keyword"
+                @toggle="toggleTodo"
+                @delete="removeOne"
+                @edit="openEditModal"
+                @select="toggleSelect"
+                @remind="openRemindModal"
+              />
+
+              <div v-if="!loading && todos.length === 0" class="empty-state">
+                <div class="empty-icon">{{ keyword ? '🔍' : '📭' }}</div>
+                <p class="empty-text">{{ keyword ? '没有匹配的待办' : '暂无待办事项' }}</p>
+                <p class="empty-hint">
+                  {{ keyword ? '试试更换关键词或清空搜索' : '使用浏览器扩展收藏网页，或点击下方按钮新建' }}
+                </p>
+                <button v-if="keyword" class="btn ghost" @click="onKeyword('')">清空搜索</button>
+              </div>
+            </div>
+          </template>
         </template>
       </main>
     </div>
@@ -180,6 +223,38 @@
       </div>
     </div>
 
+    <!-- 全局搜索面板 -->
+    <GlobalSearch
+      :todos="todos"
+      :categories="categories"
+      @goto="handleStatsGoto"
+    />
+
+    <!-- 快速添加栏 -->
+    <QuickAddBar @saved="loadTodos" @close="quickAddOpen = false" />
+
+    <!-- 批量操作浮栏 -->
+    <BatchBar
+      v-if="!['kanban', 'calendar'].includes(currentListView)"
+      :selected-ids="selectedIds"
+      :categories="categories"
+      @clear="selectedIds = []"
+      @batch-complete="batchComplete"
+      @batch-priority="batchPriority"
+      @batch-category="batchCategory"
+      @batch-delete="batchDelete"
+    />
+
+    <!-- 完成动画 -->
+    <CompletionAnim />
+
+    <!-- 模板快速选择面板（Ctrl+Shift+T） -->
+    <TemplatePicker
+      :open="templatePickerOpen"
+      @close="templatePickerOpen = false"
+      @generated="loadTodos"
+    />
+
     <ToastHost />
   </div>
 </template>
@@ -194,13 +269,23 @@ import StatsPanel from './components/StatsPanel.vue'
 import TrashView from './components/TrashView.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ScriptManager from './components/ScriptManager.vue'
+import GlobalSearch from './components/GlobalSearch.vue'
+import QuickAddBar from './components/QuickAddBar.vue'
+import BatchBar from './components/BatchBar.vue'
+import KanbanView from './components/KanbanView.vue'
+import CalendarView from './components/CalendarView.vue'
+import CompletionAnim from './components/CompletionAnim.vue'
 import ToastHost from './components/ToastHost.vue'
+import TemplateManager from './components/TemplateManager.vue'
+import TemplatePicker from './components/TemplatePicker.vue'
+import PlanningView from './components/PlanningView.vue'
 import { useTodos } from './composables/useTodos'
 import { useCategories } from './composables/useCategories'
 import { useTheme } from './composables/useTheme'
 import { loadSettings, updateSettings } from './composables/useSettings'
 import { extensionGuideOpen, openExtensionGuide } from './composables/useUi'
 import { pushToast } from './composables/useToast'
+import { registerKeyboardShortcuts, searchOpen, quickAddOpen, templatePickerOpen } from './composables/useKeyboardShortcuts'
 
 const {
   todos, loading, filter, keyword, categoryId, view, sortBy, order, stats,
@@ -216,6 +301,7 @@ const modalVisible = ref(false)
 const editingTodo = ref(null)
 const focusRemind = ref(false)
 const currentView = ref('list')
+const currentListView = ref('list') // 'list' | 'kanban' | 'calendar'
 
 const serverPort = ref(null)
 const serverToken = ref('')
@@ -234,6 +320,88 @@ const tabSliderStyle = computed(() => {
   const idx = tabs.value.findIndex((t) => t.key === filter.value)
   return { transform: `translateX(${Math.max(idx, 0) * 100}%)` }
 })
+
+const viewSwitcherTabs = ['list', 'kanban', 'calendar']
+const vtSliderStyle = computed(() => {
+  const idx = viewSwitcherTabs.indexOf(currentListView.value)
+  return { transform: `translateX(${idx * 100}%)` }
+})
+
+function triggerSearch() { searchOpen.value = true }
+function handleStatsGoto(action) {
+  if (
+    action === 'view-stats' ||
+    action === 'view-settings' ||
+    action === 'view-trash' ||
+    action === 'view-scripts' ||
+    action === 'view-templates' ||
+    action === 'view-planning'
+  ) {
+    currentView.value = action.replace('view-', '')
+    return
+  }
+  if (action === 'view-today') { currentView.value = 'list'; setView('today') }
+  else if (action === 'view-overdue') { currentView.value = 'list'; setView('overdue') }
+  else if (action === 'view-week') { currentView.value = 'list'; setView('week') }
+  else if (action.startsWith('focus:')) {
+    const id = action.replace('focus:', '')
+    currentView.value = 'list'
+    setView('all')
+    window.electronAPI.focusTodo(id).catch(() => {})
+  } else if (action.startsWith('category:')) {
+    const catId = action.replace('category:', '')
+    currentView.value = 'list'
+    setView('all')
+    setCategory(catId)
+  }
+}
+function onCalendarDayClick(dateStr) {
+  // 跳到今天的日历，弹出新建弹窗
+  currentView.value = 'list'
+  currentListView.value = 'list'
+  openAddModal()
+}
+
+// ---------- 批量操作 ----------
+async function batchComplete() {
+  const ids = selectedIds.value
+  if (!ids.length) return
+  try {
+    const now = new Date().toISOString()
+    for (const id of ids) {
+      await window.electronAPI.updateTodo(id, { completed: true, completed_at: now })
+    }
+    pushToast({ message: `已完成 ${ids.length} 项`, type: 'success' })
+    selectedIds.value = []
+    loadTodos()
+  } catch (e) {
+    pushToast({ message: '批量完成失败：' + e.message, type: 'error' })
+  }
+}
+async function batchPriority(priority) {
+  const ids = selectedIds.value
+  if (!ids.length) return
+  try {
+    await window.electronAPI.batchUpdatePriority(ids, priority)
+    pushToast({ message: `已设置 ${ids.length} 项优先级为「${{ high: '高', medium: '中', low: '低' }[priority]}」`, type: 'success' })
+    selectedIds.value = []
+    loadTodos()
+  } catch (e) {
+    pushToast({ message: '批量修改失败：' + e.message, type: 'error' })
+  }
+}
+async function batchCategory(catId) {
+  const ids = selectedIds.value
+  if (!ids.length) return
+  try {
+    await window.electronAPI.batchUpdateCategory(ids, catId || '')
+    pushToast({ message: `已移动 ${ids.length} 项到「${catId ? categories.find(c => c.id === catId)?.name || '未分类' : '未分类'}」`, type: 'success' })
+    selectedIds.value = []
+    loadTodos()
+  } catch (e) {
+    pushToast({ message: '批量移动失败：' + e.message, type: 'error' })
+  }
+}
 
 // ---------- 搜索防抖在组件内完成，这里只负责同步 ----------
 function onKeyword(v) {
@@ -351,6 +519,24 @@ onMounted(async () => {
   await loadCategories()
   await loadTodos()
 
+  // 快捷键注册
+  registerKeyboardShortcuts({
+    onSearchOpen: triggerSearch,
+    onQuickAddOpen: () => { /* 快速添加栏由 quickAddOpen ref 控制 */ },
+    onNewTodo: openAddModal,
+    onToggleFirstSelected: () => {
+      if (selectedIds.value.length > 0) {
+        const id = selectedIds.value[0]
+        const todo = todos.value.find(t => t.id === id)
+        if (todo) toggleTodo(todo)
+      }
+    },
+    onDeleteSelected: batchDelete
+  })
+  watch(quickAddOpen, val => {
+    if (!val) { /* handled by component */ }
+  })
+
   if (window.electronAPI.onTodosChanged) disposers.push(window.electronAPI.onTodosChanged(() => loadTodos()))
   if (window.electronAPI.onMenuNewTodo) disposers.push(window.electronAPI.onMenuNewTodo(() => openAddModal()))
   if (window.electronAPI.onMenuViewToday) {
@@ -361,6 +547,12 @@ onMounted(async () => {
   }
   if (window.electronAPI.onMenuOpenScripts) {
     disposers.push(window.electronAPI.onMenuOpenScripts(() => { currentView.value = 'scripts' }))
+  }
+  if (window.electronAPI.onMenuOpenTemplates) {
+    disposers.push(window.electronAPI.onMenuOpenTemplates(() => { currentView.value = 'templates' }))
+  }
+  if (window.electronAPI.onMenuOpenPlanning) {
+    disposers.push(window.electronAPI.onMenuOpenPlanning(() => { currentView.value = 'planning' }))
   }
   if (window.electronAPI.onFocusTodo) {
     disposers.push(window.electronAPI.onFocusTodo((payload) => {
@@ -423,6 +615,32 @@ watch([filter, categoryId, view], () => { selectedIds.value = [] })
 /* ---- 主体 ---- */
 .app-body { flex: 1; display: flex; overflow: hidden }
 .app-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 16px 20px; gap: 14px; min-width: 0 }
+
+/* ---- 视图切换器 ---- */
+.view-switcher { flex-shrink: 0 }
+.view-tabs {
+  position: relative;
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--bg-secondary); border-radius: 11px;
+  border: 1px solid var(--border-color); width: fit-content;
+}
+.vt-slider {
+  position: absolute; top: 3px; left: 3px;
+  width: calc((100% - 6px) / 3); height: calc(100% - 6px);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  transition: transform 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.28);
+}
+.vt-btn {
+  position: relative; z-index: 1;
+  padding: 5px 14px; border: none; background: transparent;
+  border-radius: 8px; cursor: pointer;
+  font-size: calc(12.5px * var(--font-scale));
+  color: var(--text-secondary); transition: color 0.2s ease; white-space: nowrap;
+}
+.vt-btn.active { color: #fff; font-weight: 600 }
+.vt-btn:not(.active):hover { color: var(--text-primary) }
 
 /* ---- 筛选条 ---- */
 .filter-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px }
@@ -606,5 +824,8 @@ watch([filter, categoryId, view], () => { selectedIds.value = [] })
 /* ---- 窄屏适配 ---- */
 @media (max-width: 900px) {
   .brand-text { display: none }
+  .app-header { gap: 10px; padding: 0 12px }
+  .header-actions { gap: 4px }
+  .icon-btn { width: 30px; height: 30px }
 }
 </style>

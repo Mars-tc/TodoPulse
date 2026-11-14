@@ -70,6 +70,8 @@
     </div>
 
     <div class="sidebar-footer">
+      <button class="ghost-btn" @click="$emit('manage-planning')">🧭 智能规划</button>
+      <button class="ghost-btn" @click="$emit('manage-templates')">🧰 模板库</button>
       <button class="ghost-btn" @click="$emit('manage-scripts')">🧩 网页脚本</button>
       <button class="ghost-btn" @click="$emit('manage-trash')">🗑️ 回收站</button>
       <button class="ghost-btn" @click="$emit('show-stats')">📊 统计</button>
@@ -82,7 +84,7 @@ import { ref, computed, nextTick } from 'vue'
 import { useCategories } from '../composables/useCategories'
 import { stats } from '../composables/useTodos'
 
-defineEmits(['select', 'view', 'show-stats', 'manage-trash', 'manage-scripts'])
+defineEmits(['select', 'view', 'show-stats', 'manage-trash', 'manage-scripts', 'manage-templates', 'manage-planning'])
 
 const props = defineProps({
   view: { type: String, default: 'all' },

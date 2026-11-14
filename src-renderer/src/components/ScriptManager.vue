@@ -24,6 +24,9 @@
               <span class="item-name">{{ s.name }}</span>
               <span class="item-meta">
                 <span :class="['mode-tag', s.mode]">{{ s.mode === 'js' ? 'JS' : '选择器' }}</span>
+                <template v-for="d in matchDims(s)" :key="d">
+                  <span class="dim-tag">{{ d }}</span>
+                </template>
                 {{ s.patterns.length }} 条规则 · {{ s.action === 'submit' ? '一键入库' : '预填' }}
               </span>
             </div>
@@ -91,6 +94,13 @@ function select(s) {
   draftNew.value = null
   selectedId.value = s.id
   editorKey.value++
+}
+
+// 列出脚本配置的高级匹配维度（用于列表徽标）
+const MATCH_DIM_LABELS = { title: '标题', path: '路径', domain: '域名', selection: '选中' }
+function matchDims(s) {
+  const m = (s && s.match) || {}
+  return Object.keys(MATCH_DIM_LABELS).filter((k) => Array.isArray(m[k]) && m[k].length).map((k) => MATCH_DIM_LABELS[k])
 }
 
 function createNew() {
@@ -240,6 +250,15 @@ async function remove(id) {
 }
 .mode-tag.selector { background: rgba(59, 130, 246, 0.14); color: #3b82f6 }
 .mode-tag.js { background: rgba(124, 58, 237, 0.14); color: #7c3aed }
+.dim-tag {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: calc(10px * var(--font-scale));
+  font-weight: 600;
+  line-height: 15px;
+  background: rgba(234, 179, 8, 0.16);
+  color: #b45309;
+}
 
 .item-ops { display: none; gap: 2px; flex-shrink: 0 }
 .script-item:hover .item-ops { display: flex }

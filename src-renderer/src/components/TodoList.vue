@@ -29,6 +29,18 @@
           <svg v-if="todo.completed" viewBox="0 0 24 24" class="tick"><path d="M5 13l4 4L19 7" /></svg>
         </button>
 
+        <!-- 行内悬停操作 -->
+        <div class="todo-row-ops">
+          <button class="row-op" :title="'编辑'" @click.stop="$emit('edit', todo)">✏️</button>
+          <button class="row-op row-op-del" :title="'删除'" @click.stop="$emit('delete', todo.id)">🗑️</button>
+          <button
+            v-if="!todo.completed"
+            class="row-op row-op-quick"
+            :title="'快速完成'"
+            @click.stop="$emit('toggle', todo)"
+          >⚡</button>
+        </div>
+
         <div class="todo-content" @click="$emit('edit', todo)">
           <div class="todo-title-row">
             <span class="todo-title" v-html="highlight(todo.title, keyword)"></span>
@@ -266,6 +278,22 @@ function openSourceUrl(url) {
   border-left: 2px solid var(--border-color);
 }
 .create-time { font-size: calc(11px * var(--font-scale)); color: var(--text-muted); margin-top: 5px }
+
+/* 行内悬停操作（右侧快速操作） */
+.todo-row-ops {
+  display: flex; gap: 2px; flex-shrink: 0; opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.todo-item:hover .todo-row-ops { opacity: 1 }
+.row-op {
+  width: 26px; height: 26px; border: none; border-radius: 6px;
+  background: transparent; cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.row-op:hover { transform: scale(1.15) }
+.row-op-del:hover { background: rgba(239, 68, 68, 0.15) }
+.row-op-quick:hover { background: rgba(22, 163, 74, 0.15) }
 
 .todo-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.2s ease }
 .todo-item:hover .todo-actions { opacity: 1 }

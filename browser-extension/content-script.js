@@ -39,7 +39,19 @@
     '#__todopulse_hit .hit-name { font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }',
     '#__todopulse_hit select { flex:1;min-width:110px;padding:3px 6px;border:1px solid rgba(59,130,246,.35);border-radius:6px;background:white;color:#1d4ed8;font-size:11px;outline:none;font-family:inherit }',
     '#__todopulse_hit button { padding:3px 8px;border:1px solid rgba(59,130,246,.35);border-radius:6px;background:white;color:#1d4ed8;font-size:11px;font-weight:600;cursor:pointer;transition:all .16s ease }',
-    '#__todopulse_hit button:hover { background:#3b82f6;color:white;border-color:#3b82f6 }'
+    '#__todopulse_hit button:hover { background:#3b82f6;color:white;border-color:#3b82f6 }',
+    '#__todopulse_hit .hit-name { font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }',
+    '#__todopulse_hit .hit-via { padding:1px 7px;border-radius:6px;background:rgba(59,130,246,.16);color:#1d4ed8;font-size:10.5px;font-weight:600 }',
+    '#__todopulse_hit .hit-conf { margin-left:auto;padding:1px 8px;border-radius:6px;background:rgba(22,163,74,.14);color:#15803d;font-size:10.5px;font-weight:700 }',
+    '#__todopulse_hit .hit-chips { flex-basis:100%;display:flex;flex-wrap:wrap;gap:5px;margin-top:2px }',
+    '#__todopulse_hit .hit-chip { display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:white;border:1px solid rgba(59,130,246,.3);font-size:10.5px;color:#334155;max-width:100%; }',
+    '#__todopulse_hit .hit-chip i { font-style:normal;color:#1d4ed8;font-weight:700 }',
+    '#__todopulse_hit .hit-note { flex-basis:100%;opacity:.8;font-size:10.5px;margin-top:2px }',
+    /* ---- 选中文字推荐浮窗 ---- */
+    '#__todopulse_selpill { display:none;position:absolute;z-index:2147483646;align-items:center;gap:6px;padding:7px 12px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;border:none;border-radius:18px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(37,99,235,.4);transition:transform .18s ease,box-shadow .18s ease;font-family:inherit;white-space:nowrap; }',
+    '#__todopulse_selpill.show { display:flex;animation:tpslide .25s ease }',
+    '#__todopulse_selpill:hover { transform:translateY(-2px);box-shadow:0 6px 22px rgba(37,99,235,.5) }',
+    '#__todopulse_selpill .pill-name { max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }'
   ].join('\n');
 
   var style = document.createElement('style');
@@ -92,12 +104,17 @@
   var matched = [];           // 当前 URL 命中的脚本
   var activeScript = null;    // 当前生效脚本
   var scriptsLoaded = false;
+  var matchedVia = {};        // scriptId -> 命中的维度（url/title/domain/path），用于反馈来源
+  var lastSelectionScripts = []; // 当前选中文字命中的脚本（智能推荐）
+  var forcedSelection = '';   // 选中文字浮窗点击后保留的选中文本，供面板/沙箱使用
+  var lastExtract = { data: {}, via: '' }; // 最近一次提取结果，用于命中反馈展示
 
   function escapeHtml(t) {
     var d = document.createElement('div'); d.textContent = t || ''; return d.innerHTML;
   }
 
   function getSelectionText() {
+    if (forcedSelection) return forcedSelection;
     return String(window.getSelection().toString() || '').trim();
   }
 
@@ -134,8 +151,97 @@
   }
 
   function pickMatched(list, url) {
+    matchedVia = {};
+    var ctx = pageCtx();
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var r = matchPage(list[i], ctx);
+      if (r.hit) {
+        matchedVia[list[i].id] = r.via;
+        out.push(list[i]);
+      }
+    }
+    return out;
+  }
+
+  /** 当前页面的匹配上下文（标题 / 域名 / 路径） */
+  function pageCtx() {
+    return {
+      url: window.location.href,
+      title: document.title || '',
+      host: window.location.hostname || '',
+      path: window.location.pathname || ''
+    };
+  }
+
+  /**
+   * 单条脚本的页面级匹配：URL 通配命中，或标题/域名/路径任一维度命中
+   * @returns {{hit:boolean, via:string}}
+   */
+  function matchPage(script, ctx) {
+    if (Array.isArray(script.patterns) && script.patterns.some(function(p) { return matchUrl(ctx.url, p); })) {
+      return { hit: true, via: 'url' };
+    }
+    var m = script.match || {};
+    if (matchToken(ctx.title, m.title)) return { hit: true, via: 'title' };
+    if (matchToken(ctx.host, m.domain)) return { hit: true, via: 'domain' };
+    if (matchPath(ctx.path, m.path)) return { hit: true, via: 'path' };
+    return { hit: false, via: '' };
+  }
+
+  /**
+   * 子串（不区分大小写）或 /正则/ 匹配：目标串命中任一规则即返回 true
+   * 正则支持可选修饰符，如 /issue/i；非法正则静默跳过，不阻断其他规则
+   */
+  function matchToken(target, patterns) {
+    if (!target || !Array.isArray(patterns) || !patterns.length) return false;
+    var t = String(target).toLowerCase();
+    for (var i = 0; i < patterns.length; i++) {
+      var p = String(patterns[i] || '').trim();
+      if (!p) continue;
+      try {
+        if (p.charAt(0) === '/' && p.length > 1) {
+          var lastSlash = p.lastIndexOf('/');
+          if (lastSlash > 0) {
+            var body = p.slice(1, lastSlash);
+            if (body) {
+              var flags = p.slice(lastSlash + 1);
+              if (new RegExp(body, flags.indexOf('i') === -1 ? 'i' : flags).test(t)) return true;
+            }
+            continue;
+          }
+        }
+        if (t.indexOf(p.toLowerCase()) !== -1) return true;
+      } catch (e) { /* 跳过非法正则或匹配异常 */ }
+    }
+    return false;
+  }
+
+  /** 路径通配（* 匹配任意段）：/issues/* 之类，仅对 pathname 生效 */
+  function matchPath(pathname, patterns) {
+    if (!pathname || !Array.isArray(patterns) || !patterns.length) return false;
+    for (var i = 0; i < patterns.length; i++) {
+      var re = pathToRegExp(patterns[i]);
+      if (re && re.test(pathname)) return true;
+    }
+    return false;
+  }
+
+  function pathToRegExp(pattern) {
+    var p = String(pattern || '').trim();
+    if (!p) return null;
+    var escaped = p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    try { return new RegExp('^' + escaped + '$', 'i'); } catch (e) { return null; }
+  }
+
+  /**
+   * 选中文字智能推荐：脚本配置了 match.selection 且命中选中文本
+   */
+  function pickSelectionScripts(list, text) {
+    if (!text) return [];
     return list.filter(function(s) {
-      return Array.isArray(s.patterns) && s.patterns.some(function(p) { return matchUrl(url, p); });
+      var m = s.match || {};
+      return matchToken(text, m.selection);
     });
   }
 
@@ -331,7 +437,18 @@
   }
 
   // ---------- 命中提示条 ----------
-  function renderHitBar(note) {
+  function viaLabel(via) {
+    switch (via) {
+      case 'url': return 'URL 规则匹配';
+      case 'title': return '页面标题匹配';
+      case 'domain': return '域名关键词匹配';
+      case 'path': return 'URL 路径匹配';
+      case 'selection': return '选中文字匹配';
+      default: return '脚本匹配';
+    }
+  }
+
+  function renderHitBar(note, via) {
     if (!activeScript) {
       hitDiv.classList.remove('show');
       hitDiv.innerHTML = '';
@@ -339,8 +456,9 @@
     }
     hitDiv.classList.add('show');
 
-    var html = '<span>⚡</span><span>脚本</span><span class="hit-name">' +
+    var html = '<span>⚡</span><span class="hit-name">' +
       escapeHtml(activeScript.name) + '</span>';
+    html += '<span class="hit-via">' + escapeHtml(viaLabel(via)) + '</span>';
 
     if (matched.length > 1) {
       html += '<select id="__todopulse_scriptsel">' + matched.map(function(s) {
@@ -349,8 +467,26 @@
       }).join('') + '</select>';
     }
 
+    // 已提取字段胶囊 + 置信度
+    var data = lastExtract.data || {};
+    var chips = [];
+    var count = 0;
+    [['title', '标题'], ['description', '描述'], ['deadline', '截止'], ['priority', '优先级']].forEach(function(pair) {
+      var v = data[pair[0]];
+      if (v) {
+        count++;
+        chips.push('<span class="hit-chip"><i>' + pair[1] + '</i>' +
+          escapeHtml(String(v).slice(0, 40)) + '</span>');
+      }
+    });
+    if (chips.length) {
+      var pct = Math.round((count / 4) * 100);
+      html += '<span class="hit-conf">置信度 ' + pct + '%</span>';
+      html += '<div class="hit-chips">' + chips.join('') + '</div>';
+    }
+
     html += '<button id="__todopulse_rerun" type="button">重新提取</button>';
-    if (note) html += '<span style="flex-basis:100%;opacity:.75">' + escapeHtml(note) + '</span>';
+    if (note) html += '<span class="hit-note">' + escapeHtml(note) + '</span>';
 
     hitDiv.innerHTML = html;
 
@@ -374,19 +510,25 @@
   function applyResultFlow(allowSubmit) {
     if (!activeScript) return Promise.resolve(false);
 
+    var via = matchedVia[activeScript.id] || '';
+    if (!via && lastSelectionScripts.indexOf(activeScript) >= 0) via = 'selection';
+
     return runScript(activeScript).then(function(res) {
       if (!res.ok) {
-        renderHitBar('提取失败：' + res.error);
+        lastExtract = { data: {}, via: via };
+        renderHitBar('提取失败：' + res.error, via);
         return false;
       }
       var data = res.data || {};
       if (!data.title && !data.description && !data.deadline && !data.priority) {
-        renderHitBar('未提取到内容，请手动填写');
+        lastExtract = { data: {}, via: via };
+        renderHitBar('未提取到内容，请手动填写', via);
         return false;
       }
 
       fillForm(data);
-      renderHitBar('已自动提取，可修改后提交');
+      lastExtract = { data: data, via: via };
+      renderHitBar('已自动提取，可修改后提交', via);
 
       // 一键入库模式：直接提交
       if (allowSubmit && activeScript.action === 'submit') {
@@ -476,8 +618,15 @@
     var flow = scriptsLoaded ? Promise.resolve(scriptList) : loadScripts();
     flow.then(function() {
       refreshMatched();
-      if (matched.length) applyResultFlow(false);
-      else renderHitBar();
+      // 优先页面命中脚本；否则使用选中文字智能推荐的脚本
+      if (matched.length) {
+        applyResultFlow(false);
+      } else if (lastSelectionScripts.length) {
+        activeScript = lastSelectionScripts[0];
+        applyResultFlow(false);
+      } else {
+        renderHitBar();
+      }
     });
   }
 
@@ -487,6 +636,7 @@
     if (isOpen) {
       isOpen = false;
       widget.classList.remove('open');
+      resetSelectionState();
       return;
     }
 
@@ -505,6 +655,7 @@
     if (!widget.contains(e.target) && isOpen) {
       isOpen = false;
       widget.classList.remove('open');
+      resetSelectionState();
     }
   });
 
@@ -549,6 +700,7 @@
       submitBtn.textContent = '添加到待办';
       isOpen = false;
       widget.classList.remove('open');
+      resetSelectionState();
     }
   });
 
@@ -563,6 +715,84 @@
       setTimeout(function() { t.remove(); }, 300);
     }, 3000);
   }
+
+  /** 清空选中文字缓存（面板关闭或提交后调用，避免残留影响后续匹配） */
+  function resetSelectionState() {
+    forcedSelection = '';
+    lastSelectionScripts = [];
+    hideSelPill();
+  }
+
+  // ============================================================
+  // 选中文字智能推荐浮窗
+  // ============================================================
+  var selPill = null;
+  var selDebounce = 0;
+
+  function ensureSelPill() {
+    if (selPill) return selPill;
+    selPill = document.createElement('button');
+    selPill.id = '__todopulse_selpill';
+    selPill.type = 'button';
+    selPill.addEventListener('click', function(e) {
+      e.stopPropagation();
+      hideSelPill();
+      openPanel();
+    });
+    document.body.appendChild(selPill);
+    return selPill;
+  }
+
+  function hideSelPill() {
+    if (selPill) selPill.classList.remove('show');
+  }
+
+  function showSelPill(text, scripts) {
+    var pill = ensureSelPill();
+    var sel = window.getSelection();
+    var rect = null;
+    try {
+      if (sel && sel.rangeCount) rect = sel.getRangeAt(0).getBoundingClientRect();
+    } catch (e) { rect = null; }
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      // 选区无有效矩形（如跨 iframe / 隐藏），降级为视口顶部居中
+      rect = { top: 12, left: window.innerWidth / 2, width: 0, height: 0 };
+    }
+    var name = scripts.length === 1 ? scripts[0].name : ('匹配到 ' + scripts.length + ' 个脚本');
+    pill.innerHTML = '⚡ 用「<span class="pill-name">' + escapeHtml(name) + '</span>」收藏选中内容';
+    pill.style.top = (window.scrollY + rect.top - 44) + 'px';
+    pill.style.left = (window.scrollX + rect.left + rect.width / 2) + 'px';
+    pill.style.transform = 'translateX(-50%)';
+    pill.classList.add('show');
+  }
+
+  /** 监听选中变化：防抖 200ms，命中 match.selection 的脚本则浮出提示 */
+  function onSelectionChange() {
+    clearTimeout(selDebounce);
+    selDebounce = setTimeout(function() {
+      var text = getSelectionText();
+      if (!text) {
+        forcedSelection = '';
+        lastSelectionScripts = [];
+        hideSelPill();
+        return;
+      }
+      var scripts = pickSelectionScripts(scriptList, text);
+      if (!scripts.length) {
+        forcedSelection = '';
+        lastSelectionScripts = [];
+        hideSelPill();
+        return;
+      }
+      forcedSelection = text;
+      lastSelectionScripts = scripts;
+      showSelPill(text, scripts);
+    }, 200);
+  }
+
+  // 失焦 / 选区收起时隐藏浮窗
+  document.addEventListener('selectionchange', onSelectionChange);
+  window.addEventListener('blur', hideSelPill);
 
   // 页面加载后静默拉取一次脚本，使悬浮按钮能提前切换为「一键收藏」态
   try {

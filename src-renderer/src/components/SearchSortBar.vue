@@ -105,6 +105,7 @@ watch(localKeyword, (v) => {
 
 .sort-box {
   display: flex;
+  flex-shrink: 0;
   gap: 2px;
   padding: 3px;
   background: var(--bg-secondary);
@@ -116,6 +117,7 @@ watch(localKeyword, (v) => {
   align-items: center;
   gap: 3px;
   padding: 5px 11px;
+  white-space: nowrap;
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -132,4 +134,9 @@ watch(localKeyword, (v) => {
   box-shadow: 0 1px 4px var(--shadow-color);
 }
 .arrow { font-size: calc(10px * var(--font-scale)) }
+@media (max-width: 900px) {
+  .search-sort-bar { gap: 6px }
+  .search-box { min-width: 96px; padding: 0 8px }
+  .sort-btn { padding: 5px 7px }
+}
 </style>

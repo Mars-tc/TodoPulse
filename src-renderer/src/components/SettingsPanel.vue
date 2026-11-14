@@ -50,6 +50,8 @@ import StartupSection from './settings/StartupSection.vue'
 import DataSection from './settings/DataSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import WidgetSection from './settings/WidgetSection.vue'
+import AutoCategorizeSection from './settings/AutoCategorizeSection.vue'
+import PlanningSection from './settings/PlanningSection.vue'
 
 defineEmits(['back'])
 
@@ -58,6 +60,8 @@ const nav = [
   { id: 'reminder', label: '提醒', icon: '🔔' },
   { id: 'server', label: '服务与扩展', icon: '🔗' },
   { id: 'startup', label: '启动与关闭', icon: '🚀' },
+  { id: 'auto-categorize', label: '自动分类', icon: '🤖' },
+  { id: 'planning', label: '智能规划', icon: '🧭' },
   { id: 'data', label: '数据管理', icon: '💾' },
   { id: 'widget', label: '悬浮窗', icon: '📌' },
   { id: 'about', label: '关于', icon: 'ℹ️' }
@@ -68,6 +72,8 @@ const sections = {
   reminder: markRaw(ReminderSection),
   server: markRaw(ServerSection),
   startup: markRaw(StartupSection),
+  'auto-categorize': markRaw(AutoCategorizeSection),
+  planning: markRaw(PlanningSection),
   data: markRaw(DataSection),
   widget: markRaw(WidgetSection),
   about: markRaw(AboutSection)

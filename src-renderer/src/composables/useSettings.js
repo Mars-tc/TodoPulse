@@ -30,6 +30,19 @@ export const DEFAULT_SETTINGS = {
     height: 420,
     opacity: 100,
     showCompleted: false
+  },
+  planning: {
+    daily_capacity_minutes: 240,    // 每日容量（分钟）
+    default_estimate_minutes: 30,   // 未标注预估耗时的默认计入
+    urgent_within_days: 3,          // 距截止 N 天内视为紧急
+    auto_defer_enabled: false,      // 逾期自动顺延（默认关闭）
+    auto_defer_strategy: 'today',   // today | next_workday | mark_only
+    quadrant_suggest_enabled: true, // 象限自动建议
+    energy_slots: [
+      { label: '上午高能', start: '08:00', end: '12:00', energy: 'high' },
+      { label: '午后中等', start: '13:00', end: '18:00', energy: 'medium' },
+      { label: '晚间低能', start: '19:00', end: '22:00', energy: 'low' }
+    ]
   }
 }
 

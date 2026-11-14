@@ -6,6 +6,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { randomBytes } = require('crypto');
 const { v4: uuid } = require('uuid');
 
 let appDataPath = null;
@@ -40,6 +41,19 @@ const DEFAULT_SETTINGS = {
     height: 420,
     opacity: 100,           // 不透明度 60-100
     showCompleted: false    // 是否展示已完成（false 时看板仅显示未完成）
+  },
+  planning: {
+    daily_capacity_minutes: 240,    // 每日容量（分钟）：今日排期能容纳的总投入
+    default_estimate_minutes: 30,   // 未标注预估耗时的待办按此计入容量
+    urgent_within_days: 3,          // 距截止 N 天内视为紧急（象限建议用）
+    auto_defer_enabled: false,      // 逾期自动顺延开关（默认关闭，避免擅自改写截止时间）
+    auto_defer_strategy: 'today',   // today 顺延到今天 | next_workday 下一个工作日 | mark_only 仅标记
+    quadrant_suggest_enabled: true, // 是否提供象限自动建议
+    energy_slots: [
+      { label: '上午高能', start: '08:00', end: '12:00', energy: 'high' },
+      { label: '午后中等', start: '13:00', end: '18:00', energy: 'medium' },
+      { label: '晚间低能', start: '19:00', end: '22:00', energy: 'low' }
+    ]
   }
 };
 
@@ -47,21 +61,27 @@ const DEFAULT_SETTINGS = {
  * 深合并：对象逐层合并，数组/基本类型直接覆盖
  * 用递归而非 Object.assign，确保 settings 的嵌套子项（reminder/startup）不丢
  */
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function deepMerge(base, override) {
-  if (Array.isArray(base) || Array.isArray(override)) {
-    return override === undefined ? base : override;
+  if (Array.isArray(base)) {
+    const value = Array.isArray(override) ? override : base;
+    return value.map((item) => deepMerge(undefined, item));
   }
-  if (
-    base !== null && typeof base === 'object' &&
-    override !== null && typeof override === 'object'
-  ) {
-    const out = { ...base };
-    for (const key of Object.keys(override)) {
-      out[key] = key in out ? deepMerge(out[key], override[key]) : override[key];
+  if (isRecord(base) || isRecord(override)) {
+    const left = isRecord(base) ? base : {};
+    const right = isRecord(override) ? override : {};
+    const out = {};
+    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      if (['__proto__', 'constructor', 'prototype'].includes(key)) continue;
+      out[key] = deepMerge(left[key], right[key]);
     }
     return out;
   }
-  return override === undefined ? base : override;
+  const value = override === undefined ? base : override;
+  return Array.isArray(value) ? value.map((item) => deepMerge(undefined, item)) : value;
 }
 
 /**
@@ -69,10 +89,12 @@ function deepMerge(base, override) {
  * 用于归一化校验，避免脏数据或超长内容入库
  */
 const SCRIPT_FIELDS = ['title', 'description', 'deadline', 'priority'];
-const SCRIPT_LIMITS = { name: 60, pattern: 300, selector: 500, code: 20000 };
+const SCRIPT_LIMITS = { name: 60, pattern: 300, selector: 500, code: 20000, matchItem: 200, matchRules: 20 };
 const SCRIPT_MODES = ['selector', 'js'];
 const SCRIPT_ACTIONS = ['fill', 'submit'];
 const SCRIPT_ATTRS = ['text', 'html', 'href', 'src', 'value', 'attr'];
+// 高级匹配维度（与 patterns 正交）：标题/路径/域名/选中文字
+const SCRIPT_MATCH_KEYS = ['title', 'path', 'domain', 'selection'];
 
 /**
  * 归一化单条脚本：补齐缺失字段、枚举非法回落默认、超长截断、仅保留白名单键
@@ -107,6 +129,16 @@ function normalizeScript(raw, preserveMeta = false) {
     };
   }
 
+  // 高级匹配条件：与 patterns 正交，归一化为白名单键的数组（子串或 /regex/）
+  const match = {};
+  const rawMatch = s.match && typeof s.match === 'object' ? s.match : {};
+  for (const key of SCRIPT_MATCH_KEYS) {
+    const arr = (Array.isArray(rawMatch[key]) ? rawMatch[key] : [])
+      .filter((x) => typeof x === 'string' && x.trim())
+      .map((x) => x.trim().slice(0, SCRIPT_LIMITS.matchItem));
+    if (arr.length) match[key] = arr.slice(0, SCRIPT_LIMITS.matchRules);
+  }
+
   return {
     id: typeof s.id === 'string' && s.id ? s.id : uuid(),
     name: (typeof s.name === 'string' && s.name.trim()
@@ -117,6 +149,7 @@ function normalizeScript(raw, preserveMeta = false) {
     action,
     patterns: Array.from(new Set(patterns)),
     fields,
+    match,
     code: mode === 'js' && typeof s.code === 'string'
       ? s.code.slice(0, SCRIPT_LIMITS.code)
       : '',
@@ -131,6 +164,7 @@ function normalizeScript(raw, preserveMeta = false) {
  * 设置应用数据目录（在main.js中调用）
  */
 function setAppDataPath(userDataPath) {
+  if (appDataPath !== userDataPath) currentConfig = null;
   appDataPath = userDataPath;
 }
 
@@ -148,12 +182,7 @@ function getConfigPath() {
  * 生成随机token（32位十六进制）
  */
 function generateToken() {
-  const chars = 'abcdef0123456789';
-  let token = '';
-  for (let i = 0; i < 32; i++) {
-    token += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return token;
+  return randomBytes(16).toString('hex');
 }
 
 /**
@@ -165,29 +194,25 @@ async function loadConfig() {
   const configPath = getConfigPath();
 
   let config = null;
-  if (fs.existsSync(configPath)) {
-    try {
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const parsed = JSON.parse(raw);
-
-      const portOk = Number.isInteger(parsed.port) && parsed.port > 0 && parsed.port < 65535;
-      const tokenOk = typeof parsed.token === 'string' && parsed.token.length > 0;
-
-      if (portOk && tokenOk) {
-        config = parsed;
-      } else {
-        // 部分损坏：仅修复缺失项，尽量保留原值（含已有 settings）
-        console.warn('[config_store] 配置文件不完整，正在修复...');
-        config = {
-          port: portOk ? parsed.port : await findAvailablePort(),
-          token: tokenOk ? parsed.token : generateToken()
-        };
-        if (parsed.settings) config.settings = parsed.settings;
-      }
-    } catch (e) {
-      console.error('[config_store] 读取配置文件失败，将重新生成:', e.message);
-      config = null;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (!isRecord(config)) throw new SyntaxError('配置必须为 JSON 对象');
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      const backupPath = `${configPath}.corrupt-${Date.now()}-${uuid()}`;
+      fs.copyFileSync(configPath, backupPath, fs.constants.COPYFILE_EXCL);
+      console.warn('[config_store] 已保留损坏配置副本:', backupPath);
+    } else if (e.code !== 'ENOENT') {
+      throw e;
     }
+    config = null;
+  }
+
+  if (config) {
+    const portOk = Number.isInteger(config.port) && config.port > 0 && config.port <= 65535;
+    const tokenOk = typeof config.token === 'string' && config.token.trim().length > 0;
+    if (!portOk) config.port = await findAvailablePort();
+    if (!tokenOk) config.token = generateToken();
   }
 
   // 自动生成配置
@@ -212,20 +237,41 @@ async function loadConfig() {
   // 落盘：确保新结构（含完整 settings）被持久化，且不破坏既有 port/token
   saveConfig(config);
 
-  currentConfig = config;
-  return config;
+  return deepMerge({}, currentConfig);
 }
 
 /**
  * 保存配置到文件
  */
 function saveConfig(config) {
+  if (!isRecord(config)) throw new TypeError('配置必须为对象');
+  const next = deepMerge({}, config);
+  next.settings = deepMerge(DEFAULT_SETTINGS, next.settings);
+  const content = JSON.stringify(next, null, 2);
   const configPath = getConfigPath();
   const dir = path.dirname(configPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = `${configPath}.${uuid()}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(fd, content, 'utf-8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(tempPath, configPath);
+    currentConfig = next;
+  } finally {
+    try {
+      if (fd !== undefined) fs.closeSync(fd);
+    } finally {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') console.warn('[config_store] 清理临时配置失败:', e.message);
+      }
+    }
   }
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
   console.log('[config_store] 配置已保存到:', configPath);
 }
 
@@ -234,7 +280,7 @@ function saveConfig(config) {
  */
 async function getConfig() {
   if (!currentConfig) return loadConfig();
-  return currentConfig;
+  return deepMerge({}, currentConfig);
 }
 
 /**
@@ -244,7 +290,7 @@ function getSettings() {
   if (!currentConfig) {
     return deepMerge(DEFAULT_SETTINGS, {});
   }
-  return currentConfig.settings;
+  return deepMerge(DEFAULT_SETTINGS, currentConfig.settings);
 }
 
 /**
@@ -252,11 +298,10 @@ function getSettings() {
  * @param {object} patch - 部分设置（任意层级）
  */
 function saveSettings(patch) {
-  const config = currentConfig || { port: 0, token: '', settings: {} };
-  config.settings = deepMerge(config.settings || {}, patch || {});
+  const config = { ...(currentConfig || { port: 0, token: '' }) };
+  config.settings = deepMerge(getSettings(), patch);
   saveConfig(config);
-  currentConfig = config;
-  return config.settings;
+  return getSettings();
 }
 
 /**
@@ -265,7 +310,7 @@ function saveSettings(patch) {
  */
 function getScripts() {
   if (!currentConfig) return [];
-  return Array.isArray(currentConfig.scripts) ? currentConfig.scripts : [];
+  return Array.isArray(currentConfig.scripts) ? deepMerge(undefined, currentConfig.scripts) : [];
 }
 
 /**
@@ -275,15 +320,14 @@ function getScripts() {
  * @returns {Array<object>}
  */
 function saveScripts(list) {
-  const config = currentConfig || { port: 0, token: '', settings: {}, scripts: [] };
+  const config = { ...(currentConfig || { port: 0, token: '', settings: {} }) };
   const input = Array.isArray(list) ? list : [];
   config.scripts = input
     .filter((s) => s && typeof s === 'object')
     .map((s) => normalizeScript(s));
   saveConfig(config);
-  currentConfig = config;
   console.log('[config_store] 已保存脚本，共', config.scripts.length, '条');
-  return config.scripts;
+  return getScripts();
 }
 
 /**
@@ -308,14 +352,11 @@ function findAvailablePort(startPort = 3210) {
   function tryPort(port) {
     return new Promise((resolve) => {
       const server = net.createServer();
+      server.once('listening', () => {
+        server.close(() => resolve(port));
+      });
+      server.once('error', () => resolve(null));
       server.listen(port, '127.0.0.1');
-      server.on('listening', () => {
-        server.close();
-        resolve(port);
-      });
-      server.on('error', () => {
-        resolve(null);
-      });
     });
   }
 
@@ -344,5 +385,6 @@ module.exports = {
   saveScripts,
   normalizeScript,
   SCRIPT_FIELDS,
-  SCRIPT_ATTRS
+  SCRIPT_ATTRS,
+  SCRIPT_MATCH_KEYS
 };

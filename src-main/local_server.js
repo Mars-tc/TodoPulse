@@ -17,6 +17,13 @@ let server = null;
 let port = null;
 let token = null;
 let onTodoAdded = null;
+let lifecycleQueue = Promise.resolve();
+
+function changeLifecycle(operation) {
+  const result = lifecycleQueue.then(operation);
+  lifecycleQueue = result.catch(() => {});
+  return result;
+}
 
 /**
  * 注册「新增待办后」回调，用于通知渲染层刷新
@@ -43,11 +50,21 @@ function requireToken(req, res, next) {
  * @param {string} apiToken - 鉴权token
  * @returns {Promise<import('http').Server>}
  */
-async function startServer(listenPort, apiToken) {
-  return new Promise((resolve, reject) => {
-    port = listenPort;
-    token = apiToken;
+function startServer(listenPort, apiToken) {
+  return changeLifecycle(() => startListening(listenPort, apiToken));
+}
 
+function startListening(listenPort, apiToken) {
+  if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
+    throw new Error('端口号无效');
+  }
+  if (typeof apiToken !== 'string' || !apiToken.trim()) throw new Error('token 不能为空');
+  if (server) {
+    if (port === listenPort && token === apiToken) return server;
+    throw new Error('服务已运行，请先停止再修改端口或 token');
+  }
+
+  return new Promise((resolve, reject) => {
     const app = express();
 
     // 只允许本机跨域请求
@@ -62,7 +79,8 @@ async function startServer(listenPort, apiToken) {
       next();
     });
 
-    app.use(express.json());
+    app.use(requireToken);
+    app.use(express.json({ limit: '100kb' }));
 
     // 健康检查（同样需要 token，与各接口鉴权策略保持一致）
     app.get('/api/health', requireToken, (req, res) => {
@@ -91,6 +109,7 @@ async function startServer(listenPort, apiToken) {
             mode: s.mode,
             action: s.action,
             patterns: s.patterns,
+            match: s.match || {},
             fields: s.fields,
             code: s.code
           }));
@@ -103,6 +122,15 @@ async function startServer(listenPort, apiToken) {
 
     // 新增待办接口
     app.post('/api/add-todo', requireToken, (req, res) => {
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({ success: false, error: '请求内容必须为 JSON 对象' });
+      }
+      const textFields = ['pageTitle', 'url', 'selectedText', 'title', 'description', 'priority', 'categoryId', 'deadline'];
+      for (const field of textFields) {
+        if (req.body[field] != null && typeof req.body[field] !== 'string') {
+          return res.status(400).json({ success: false, error: `${field} 必须为字符串` });
+        }
+      }
       const {
         pageTitle,
         url,
@@ -116,8 +144,16 @@ async function startServer(listenPort, apiToken) {
         remindLead
       } = req.body || {};
 
-      if (!pageTitle && !selectedText && !customTitle) {
+      if (![pageTitle, selectedText, customTitle].some((value) => value && value.trim())) {
         return res.status(400).json({ success: false, error: '标题和选中文本不能同时为空' });
+      }
+      if (remindLead != null && !['number', 'string'].includes(typeof remindLead)) {
+        return res.status(400).json({ success: false, error: '提醒提前量必须为非负整数' });
+      }
+      const lead = remindLead === undefined || remindLead === null || remindLead === ''
+        ? null : Number(remindLead);
+      if (lead !== null && (!Number.isSafeInteger(lead) || lead < 0)) {
+        return res.status(400).json({ success: false, error: '提醒提前量必须为非负整数' });
       }
 
       try {
@@ -134,19 +170,16 @@ async function startServer(listenPort, apiToken) {
           deadline = parseDeadline(selectedText || pageTitle || '');
         }
 
-        const lead = remindLead === undefined || remindLead === null || remindLead === ''
-          ? null
-          : Number(remindLead);
         const remindAt = deadline && lead !== null ? computeRemindAt(deadline, lead) : null;
+        if (deadline && lead !== null && !remindAt) {
+          return res.status(400).json({ success: false, error: '提醒时间超出有效范围' });
+        }
 
         const validPriority = ['high', 'medium', 'low'].includes(priority) ? priority : 'medium';
 
         // 优先使用扩展自定义标题，其次选中文本，最后网页标题
-        const rawTitle = (customTitle && String(customTitle).trim())
-          ? String(customTitle).trim().slice(0, 100)
-          : (selectedText && selectedText.trim())
-            ? selectedText.trim().slice(0, 100)
-            : (pageTitle || '未命名待办');
+        const rawTitle = [customTitle, selectedText, pageTitle]
+          .find((value) => value && value.trim()).trim().slice(0, 100);
 
         const todo = {
           id: uuidv4(),
@@ -170,7 +203,9 @@ async function startServer(listenPort, apiToken) {
 
         if (typeof onTodoAdded === 'function') {
           try {
-            onTodoAdded(inserted);
+            Promise.resolve(onTodoAdded(inserted)).catch((e) => {
+              console.warn('[local_server] 新增回调执行失败:', e.message);
+            });
           } catch (e) {
             console.warn('[local_server] 新增回调执行失败:', e.message);
           }
@@ -189,18 +224,34 @@ async function startServer(listenPort, apiToken) {
       }
     });
 
-    server = app.listen(port, '127.0.0.1', () => {
-      console.log(`[local_server] HTTP服务已启动: http://127.0.0.1:${port}`);
-      resolve(server);
+    app.use((err, req, res, next) => {
+      if (res.headersSent) return next(err);
+      const status = err.status >= 400 && err.status < 500 ? err.status : 500;
+      console.warn('[local_server] 请求处理失败:', err.message);
+      res.status(status).json({
+        success: false,
+        error: status === 413 ? '请求内容过大' : status === 400 ? '请求 JSON 格式不正确' : '请求处理失败'
+      });
     });
 
-    server.on('error', (err) => {
-      // 启动失败时清空 port / server，避免上层把「未运行」误报为「运行中」
-      const failedPort = port;
-      port = null;
-      server = null;
+    const candidate = app.listen(listenPort, '127.0.0.1', () => {
+      server = candidate;
+      port = listenPort;
+      token = apiToken;
+      console.log(`[local_server] HTTP服务已启动: http://127.0.0.1:${port}`);
+      resolve(candidate);
+    });
+    candidate.on('close', () => {
+      if (server === candidate) {
+        server = null;
+        port = null;
+        token = null;
+      }
+    });
+    candidate.on('error', (err) => {
+      console.error('[local_server] 服务异常:', err.message);
       if (err.code === 'EADDRINUSE') {
-        reject(new Error(`端口 ${failedPort} 已被占用，请关闭占用程序或更换端口`));
+        reject(new Error(`端口 ${listenPort} 已被占用，请关闭占用程序或更换端口`));
       } else {
         reject(err);
       }
@@ -212,19 +263,20 @@ async function startServer(listenPort, apiToken) {
  * 关闭服务
  */
 function stopServer() {
-  return new Promise((resolve) => {
-    if (server) {
-      server.close(() => {
-        server = null;
-        // 同步清空 port：上层以 getPort() 是否为空判断运行状态
-        port = null;
+  return changeLifecycle(() => {
+    if (!server) return;
+    const closingServer = server;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => closingServer.closeAllConnections(), 1000);
+      timeout.unref();
+      closingServer.close((err) => {
+        clearTimeout(timeout);
+        if (err) return reject(err);
         console.log('[local_server] 服务已关闭');
         resolve();
       });
-    } else {
-      port = null;
-      resolve();
-    }
+      closingServer.closeIdleConnections();
+    });
   });
 }
 

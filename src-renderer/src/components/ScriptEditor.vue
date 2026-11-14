@@ -54,6 +54,31 @@
       </div>
     </section>
 
+    <!-- 高级匹配条件 -->
+    <section class="card section">
+      <h3>高级匹配条件</h3>
+      <p class="section-desc">除 URL 通配外，可叠加页面标题、路径、域名关键词或选中文字特征，任一维度命中即生效（与上方规则为「或」关系，门槛更低）。</p>
+
+      <div v-for="mf in MATCH_FIELDS" :key="mf.key" class="match-group">
+        <div class="match-group-head">{{ mf.label }}</div>
+        <div class="pattern-list">
+          <div v-for="(v, i) in draft.match[mf.key]" :key="i" class="pattern-row">
+            <span class="pattern-idx">{{ i + 1 }}</span>
+            <input class="field-input" v-model="draft.match[mf.key][i]" :placeholder="mf.placeholder" />
+            <button class="mini-btn" title="移除" @click="removeMatchItem(mf.key, i)">✕</button>
+          </div>
+          <button class="add-pattern" @click="addMatchItem(mf.key)">＋ 添加{{ mf.label }}规则</button>
+        </div>
+      </div>
+
+      <div class="hint-box">
+        <b>写法说明</b>
+        普通文本：包含该子串即命中（不区分大小写），如 <code>github.com</code><br />
+        正则：用 <code>/</code> 包裹，如 <code>/PROJ-\d+/</code>、<code>/issue/i</code><br />
+        选中文字：仅在网页中选中文本且命中时，浮出「一键收藏」提示
+      </div>
+    </section>
+
     <!-- 提取配置 -->
     <section class="card section">
       <h3>提取配置</h3>
@@ -130,25 +155,30 @@
 
 <script setup>
 import { ref, reactive, watch, nextTick } from 'vue'
-import { SCRIPT_FIELDS, SCRIPT_ATTRS, validateScript, getScriptTemplate } from '../composables/useScripts'
+import { SCRIPT_FIELDS, SCRIPT_ATTRS, SCRIPT_MATCH_FIELDS, validateScript, getScriptTemplate } from '../composables/useScripts'
 
 const props = defineProps({ script: { type: Object, required: true } })
 const emit = defineEmits(['save', 'cancel', 'delete'])
 
 const FIELD_LIST = SCRIPT_FIELDS
 const ATTR_LIST = SCRIPT_ATTRS
+const MATCH_FIELDS = SCRIPT_MATCH_FIELDS
 
 const draft = reactive(emptyDraft())
 const codeRef = ref(null)
 const validateMsg = ref('')
 const validateOk = ref(false)
 
+function emptyMatch() {
+  return { title: [], path: [], domain: [], selection: [] }
+}
+
 function emptyDraft() {
   const fields = {}
   for (const f of SCRIPT_FIELDS) fields[f.key] = { selector: '', attr: 'text', attrName: '' }
   return {
     id: '', name: '', enabled: true, mode: 'selector', action: 'fill',
-    patterns: [], fields, code: '', builtin: false, updatedAt: ''
+    patterns: [], match: emptyMatch(), fields, code: '', builtin: false, updatedAt: ''
   }
 }
 
@@ -165,6 +195,12 @@ function fill(src) {
   draft.code = s.code || ''
   draft.builtin = !!s.builtin
   draft.updatedAt = s.updatedAt || ''
+  const srcMatch = (s.match && typeof s.match === 'object') ? s.match : {}
+  const baseMatch = emptyMatch()
+  for (const k of Object.keys(baseMatch)) {
+    baseMatch[k] = Array.isArray(srcMatch[k]) ? srcMatch[k].slice() : []
+  }
+  draft.match = baseMatch
   for (const f of SCRIPT_FIELDS) {
     const src2 = (s.fields && s.fields[f.key]) || {}
     base.fields[f.key] = {
@@ -182,6 +218,9 @@ watch(() => props.script, (v) => fill(v), { immediate: true, deep: false })
 
 function addPattern() { draft.patterns.push('') }
 function removePattern(i) { draft.patterns.splice(i, 1) }
+
+function addMatchItem(key) { draft.match[key].push('') }
+function removeMatchItem(key, i) { draft.match[key].splice(i, 1) }
 
 async function switchToJs() {
   draft.mode = 'js'
@@ -219,10 +258,24 @@ function onSave() {
     ...draft,
     name: (draft.name || '').trim() || '未命名脚本',
     patterns: draft.patterns.map((p) => (p || '').trim()).filter(Boolean),
+    match: cleanMatch(draft.match),
     fields,
     code: draft.mode === 'js' ? draft.code : ''
   }
   emit('save', payload)
+}
+
+/** 清理 match 空规则，仅保留有内容的维度 */
+function cleanMatch(raw) {
+  const out = {}
+  if (raw && typeof raw === 'object') {
+    for (const k of Object.keys(emptyMatch())) {
+      const arr = Array.isArray(raw[k]) ? raw[k] : []
+      const cleaned = arr.map((x) => (x || '').trim()).filter(Boolean)
+      if (cleaned.length) out[k] = cleaned
+    }
+  }
+  return out
 }
 </script>
 
@@ -232,6 +285,14 @@ function onSave() {
 .name-input { width: 220px }
 
 .pattern-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px }
+.match-group { margin-top: 14px }
+.match-group:first-of-type { margin-top: 16px }
+.match-group-head {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
 .pattern-row { display: flex; align-items: center; gap: 8px }
 .pattern-idx {
   width: 20px; height: 20px; flex-shrink: 0;

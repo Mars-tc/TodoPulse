@@ -78,10 +78,11 @@ function parseDeadlineDetailed(text) {
 function computeRemindAt(deadlineISO, leadMinutes) {
   if (!deadlineISO) return null;
   const lead = Number(leadMinutes);
-  if (!lead && lead !== 0) return null;
+  if (!Number.isFinite(lead) || lead < 0) return null;
   const d = new Date(deadlineISO);
   if (isNaN(d.getTime())) return null;
-  return new Date(d.getTime() - lead * 60000).toISOString();
+  const remindAt = new Date(d.getTime() - lead * 60000);
+  return isNaN(remindAt.getTime()) ? null : remindAt.toISOString();
 }
 
 /**

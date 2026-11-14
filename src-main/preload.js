@@ -87,6 +87,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   widgetAction: invoke('widget-action'),
   focusTodo: invoke('focus-todo'),
 
+  // 批量操作 & 日历 & 自动分类
+  batchUpdateCategory: (ids, categoryId) => ipcRenderer.invoke('batch-update-category', ids, categoryId),
+  batchUpdatePriority: (ids, priority) => ipcRenderer.invoke('batch-update-priority', ids, priority),
+  listTodosByDeadline: (year, month) => ipcRenderer.invoke('list-todos-by-deadline', year, month),
+  autoCategorize: (title, rules) => ipcRenderer.invoke('auto-categorize', title, rules),
+
+  // 任务模板与清单预设
+  listTemplates: invoke('list-templates'),
+  getTemplate: invoke('get-template'),
+  saveTemplate: invoke('save-template'),
+  deleteTemplate: invoke('delete-template'),
+  duplicateTemplate: invoke('duplicate-template'),
+  previewTemplate: invoke('preview-template'),
+  applyTemplate: invoke('apply-template'),
+
+  // 智能规划（四象限 / 今日排期 / 逾期顺延）
+  planPreview: invoke('plan-preview'),
+  deferOverdue: invoke('defer-overdue'),
+  applySuggestedQuadrant: invoke('apply-suggested-quadrant'),
+
   // 主进程事件订阅，返回取消订阅函数
   onTodosChanged: (callback) => {
     const handler = () => callback && callback();
@@ -112,6 +132,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = () => callback && callback();
     ipcRenderer.on('menu-open-scripts', handler);
     return () => ipcRenderer.removeListener('menu-open-scripts', handler);
+  },
+  onMenuOpenTemplates: (callback) => {
+    const handler = () => callback && callback();
+    ipcRenderer.on('menu-open-templates', handler);
+    return () => ipcRenderer.removeListener('menu-open-templates', handler);
+  },
+  onMenuOpenPlanning: (callback) => {
+    const handler = () => callback && callback();
+    ipcRenderer.on('menu-open-planning', handler);
+    return () => ipcRenderer.removeListener('menu-open-planning', handler);
   },
   onFocusTodo: (callback) => {
     const handler = (_e, payload) => callback && callback(payload);
