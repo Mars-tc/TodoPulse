@@ -32,4 +32,4 @@ Thumbs.db
 .env.local
 
 # 工具临时文件
-.workbuddy/tmp-*
+.workbuddy/
