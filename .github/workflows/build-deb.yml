@@ -78,7 +78,10 @@ jobs:
           binaries+=(dist-electron/linux-unpacked/todopulse)
           for f in "${binaries[@]}"; do
             symbols=$(objdump -T "$f")
-            v=$(printf '%s\n' "$symbols" | sed -n 's/.*(GLIBC_\([0-9.]*\)).*/\1/p' | sort -V | tail -1)
+            # binutils >= 2.35 prints "(GLIBC_2.2.5)" for undefined symbols,
+            # Debian 10 / binutils 2.32 prints "GLIBC_2.2.5" without parens.
+            # Match both forms so the check works on the buster container.
+            v=$(printf '%s\n' "$symbols" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sed 's/^GLIBC_//' | sort -V | tail -1)
             test -n "$v"
             echo "$f -> GLIBC_$v"
             if [ "$(printf '%s\n2.28\n' "$v" | sort -V | tail -1)" != "2.28" ]; then
